@@ -70,9 +70,14 @@ function normaliseEntry(entry) {
     for (const attr of raw.attributes) {
       const name = attr.type || '';
       if (!name) continue;
-      const vals = (attr.values || attr.vals || []).map(v =>
-        Buffer.isBuffer(v) ? v.toString('utf8') : String(v)
-      );
+      // attr.buffers = raw Buffers from BER wire; attr.values decodes to UTF-8 (corrupts binary)
+      const rawVals = attr.buffers || attr.values || attr.vals || [];
+      const vals = rawVals.map(v => {
+        if (!Buffer.isBuffer(v)) return String(v);
+        // Round-trip check: valid UTF-8 text survives encode→decode unchanged; binary does not
+        const s = v.toString('utf8');
+        return Buffer.from(s, 'utf8').equals(v) ? s : v;
+      });
       const value = vals.length === 1 ? vals[0] : vals.length === 0 ? '' : vals;
       out[name] = value;
       const nl = name.toLowerCase();

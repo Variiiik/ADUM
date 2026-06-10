@@ -110,8 +110,8 @@ Views.Services = {
 
   _renderDetail(svc, isAdmin) {
     const adBadge = svc.adLinked
-      ? `<span class="badge" style="font-size:11px;background:#e3f2fd;color:#1565c0">AD-ühendatud</span>`
-      : `<span class="badge" style="font-size:11px;background:#f3e5f5;color:#6a1b9a">Kohalik teenus</span>`;
+      ? `<span class="badge" style="font-size:11px;background:var(--tag-ad-bg);color:var(--tag-ad-ink)">AD-ühendatud</span>`
+      : `<span class="badge" style="font-size:11px;background:var(--tag-local-bg);color:var(--tag-local-ink)">Kohalik teenus</span>`;
 
     return `<div style="padding:24px 28px;max-width:860px">
 
@@ -179,7 +179,7 @@ Views.Services = {
                 <div style="flex:1;min-width:0">
                   <div class="nm" style="font-size:13px">${esc(svc.technicalPersonDetail.displayName)}</div>
                   <div class="ds">${esc(svc.technicalPersonDetail.title||'')}${svc.technicalPersonDetail.title?' · ':''}<span class="mono" style="font-size:11px">${esc(svc.technicalPersonDetail.sam)}</span>
-                    <span class="badge" style="font-size:10px;background:#fff3e0;color:#e65100;margin-left:4px">T</span>
+                    <span class="badge" style="font-size:10px;background:var(--role-t-bg);color:var(--role-t-ink);margin-left:4px">T</span>
                   </div>
                 </div>
                 ${isAdmin ? `<button class="icon-act" id="svc-clear-tech-btn" title="Eemalda tehniline isik">${icon('x',13)}</button>` : ''}

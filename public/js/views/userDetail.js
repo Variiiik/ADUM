@@ -7,11 +7,13 @@ Views.UserDetail = {
   _groups:   [],
   _services: [],   // all services (for the services tab picker)
   _userSvcs: [],   // services the user belongs to
+  _attrs:    null, // raw AD attributes for the attribute editor tab (null = not loaded)
 
   async render(container, sam) {
     if (!sam) { App.navigate('users'); return; }
     container.innerHTML = `<div class="content-inner"><div style="text-align:center;padding:60px"><div class="spinner" style="margin:auto"></div></div></div>`;
 
+    this._attrs = null;
     try {
       const [userRes, groupsRes, svcsRes, userSvcsRes, auditRes] = await Promise.all([
         API.getUser(sam),
@@ -49,11 +51,12 @@ Views.UserDetail = {
 
     const svcCount = this._userSvcs.length;
     const tabDefs = [
-      { id:'general',  label:'Üldinfo',        cnt: null },
-      { id:'groups',   label:'Grupikuuluvused', cnt: u.groups.length },
-      { id:'services', label:'Teenused',        cnt: svcCount || null },
-      { id:'account',  label:'Konto seaded',    cnt: null },
-      { id:'activity', label:'Tegevuslogi',     cnt: null },
+      { id:'general',    label:'Üldinfo',        cnt: null },
+      { id:'groups',     label:'Grupikuuluvused', cnt: u.groups.length },
+      { id:'services',   label:'Teenused',        cnt: svcCount || null },
+      { id:'account',    label:'Konto seaded',    cnt: null },
+      { id:'activity',   label:'Tegevuslogi',     cnt: null },
+      ...(isAdmin ? [{ id:'attributes', label:'Atribuudid', cnt: null }] : []),
     ];
 
     let tabContent = '';
@@ -116,11 +119,18 @@ Views.UserDetail = {
 
     } else if (tab === 'activity') {
       tabContent = self._renderActivityTab();
+
+    } else if (tab === 'attributes' && isAdmin) {
+      tabContent = self._renderAttrsTab();
     }
 
     container.innerHTML = `<div class="content-inner">
       <div class="card detail-head">
-        ${avatar(u, 76)}
+        <div class="avatar-wrap${isAdmin ? ' editable' : ''}" id="ud-avatar-wrap">
+          ${avatar(u, 76)}
+          ${isAdmin ? `<div class="avatar-overlay">${icon('upload',16)}</div>
+          <input type="file" id="ud-photo-input" accept="image/jpeg,image/png,image/webp" style="display:none">` : ''}
+        </div>
         <div class="meta">
           <h2>${esc(u.displayName)}</h2>
           <div class="role">${esc(u.title)} · ${esc(u.department)}</div>
@@ -131,8 +141,11 @@ Views.UserDetail = {
             ${u.employeeID ? `<span class="chip">${icon('id',14)} ${esc(u.employeeID)}</span>` : ''}
           </div>
         </div>
-        ${isAdmin ? `<button class="btn" id="ud-edit">${icon('edit',16)} Muuda</button>` : ''}
-        ${isHR && !isAdmin ? `<button class="btn" id="ud-hr-modify">${icon('edit',16)} Esita muutmistaotlus</button>` : ''}
+        <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
+          ${isAdmin ? `<button class="btn" id="ud-edit">${icon('edit',16)} Muuda</button>` : ''}
+          ${isHR && !isAdmin ? `<button class="btn" id="ud-hr-modify">${icon('edit',16)} Esita muutmistaotlus</button>` : ''}
+          ${isAdmin && u.photo ? `<button class="btn ghost sm" id="ud-delete-photo" style="color:var(--bad)">${icon('trash',13)} Eemalda foto</button>` : ''}
+        </div>
       </div>
 
       <div class="detail-grid">
@@ -192,6 +205,41 @@ Views.UserDetail = {
     // Edit
     if (isAdmin) {
       document.getElementById('ud-edit')?.addEventListener('click', () => Views.Users.openForm(u, null));
+    }
+
+    // Photo upload / delete
+    if (isAdmin) {
+      const photoWrap  = document.getElementById('ud-avatar-wrap');
+      const photoInput = document.getElementById('ud-photo-input');
+      if (photoWrap && photoInput) {
+        photoWrap.addEventListener('click', () => photoInput.click());
+        photoInput.addEventListener('change', async (e) => {
+          const file = e.target.files[0];
+          if (!file) return;
+          if (file.size > 10 * 1024 * 1024) { App.toast('warn', 'Fail liiga suur', 'Maksimaalselt 10 MB'); return; }
+          const reader = new FileReader();
+          reader.onload = async (ev) => {
+            try {
+              const dataUrl = await resizePhoto(ev.target.result, 128, 0.90);
+              await API.uploadUserPhoto(u.sam, dataUrl);
+              self._user.photo = dataUrl;
+              App.toast('ok', 'Foto uuendatud', u.displayName);
+              self._renderDetail(container);
+            } catch (err) { App.toast('bad', 'Foto üleslaadimine ebaõnnestus', err.message); }
+          };
+          reader.readAsDataURL(file);
+        });
+      }
+      document.getElementById('ud-delete-photo')?.addEventListener('click', () => {
+        App.confirm('Eemalda foto', `Eemaldada kasutaja "${u.displayName}" profiilipilt?`, async () => {
+          try {
+            await API.deleteUserPhoto(u.sam);
+            self._user.photo = null;
+            App.toast('ok', 'Foto eemaldatud', u.displayName);
+            self._renderDetail(container);
+          } catch (err) { App.toast('bad', 'Viga', err.message); }
+        }, { icon: 'trash', confirmLabel: 'Eemalda' });
+      });
     }
 
     // Reset password
@@ -324,6 +372,17 @@ Views.UserDetail = {
     if (tab === 'services') {
       self._bindServicesTabEvents(container, u, isAdmin);
     }
+
+    // Attributes tab — lazy load on first open
+    if (tab === 'attributes' && isAdmin) {
+      if (self._attrs === null) {
+        API.getUserAttrs(u.sam)
+          .then(r => { self._attrs = r.attrs || {}; self._renderDetail(container); })
+          .catch(err => App.toast('bad', 'Atribuutide laadimine ebaõnnestus', err.message));
+      } else {
+        self._bindAttrsTabEvents(container, u);
+      }
+    }
   },
 
   // ── Activity tab ─────────────────────────────────────────────────────────────
@@ -345,6 +404,7 @@ Views.UserDetail = {
       GROUP_REMOVE:    { bg:'var(--warn-bg)',      c:'var(--warn-ink)',ic:'group'      },
       SMS_SENT:        { bg:'var(--ok-bg)',       c:'var(--ok-ink)',  ic:'phone'       },
       UPDATE_SERVICE:  { bg:'var(--accent-weak)', c:'var(--accent)',  ic:'briefcase'   },
+      MODIFY_ATTR:     { bg:'var(--accent-weak)', c:'var(--accent)',  ic:'tool'        },
     };
 
     function fmtDT(iso) {
@@ -394,9 +454,9 @@ Views.UserDetail = {
 
     const ROLE_LABEL = { O: 'Omanik', T: 'Tehniline isik', L: 'Liige' };
     const ROLE_STYLE = {
-      O: 'background:var(--accent-weak);color:var(--accent)',
-      T: 'background:#fff3e0;color:#e65100',
-      L: 'background:#e8f5e9;color:#388e3c',
+      O: 'background:var(--role-o-bg);color:var(--role-o-ink)',
+      T: 'background:var(--role-t-bg);color:var(--role-t-ink)',
+      L: 'background:var(--role-l-bg);color:var(--role-l-ink)',
     };
 
     const svcRows = userSvcs.map(svc => {
@@ -415,7 +475,7 @@ Views.UserDetail = {
           <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
             <span class="nm" style="font-size:13px">${esc(svc.name)}</span>
             ${svc.code ? `<span style="font-family:monospace;font-size:10.5px;background:var(--border);border-radius:4px;padding:1px 5px;color:var(--ink-2)">${esc(svc.code)}</span>` : ''}
-            ${svc.adLinked ? '' : `<span style="font-size:10.5px;color:#6a1b9a">kohalik</span>`}
+            ${svc.adLinked ? '' : `<span style="font-size:10.5px;color:var(--tag-local-ink)">kohalik</span>`}
           </div>
           <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">
             ${roleBadges}${groupBadges}
@@ -477,7 +537,7 @@ Views.UserDetail = {
           ${icon('briefcase',13)}
           <span style="flex:1">${esc(svc.name)}</span>
           ${svc.code ? `<span style="font-family:monospace;font-size:10.5px;background:var(--border);border-radius:4px;padding:1px 5px">${esc(svc.code)}</span>` : ''}
-          ${!svc.adLinked ? `<span style="font-size:10.5px;color:#6a1b9a">kohalik</span>` : ''}
+          ${!svc.adLinked ? `<span style="font-size:10.5px;color:var(--tag-local-ink)">kohalik</span>` : ''}
         </div>
         ${rows}`;
     }).join('');
@@ -579,6 +639,171 @@ Views.UserDetail = {
     });
   },
 
+  // ── Attribute editor tab ─────────────────────────────────────────────────────
+
+  _renderAttrsTab() {
+    if (this._attrs === null) {
+      return `<div style="text-align:center;padding:40px"><div class="spinner" style="margin:auto"></div></div>`;
+    }
+
+    const editable = [];
+    const readonly = [];
+    for (const [k, v] of Object.entries(this._attrs).sort(([a], [b]) => a.toLowerCase().localeCompare(b.toLowerCase()))) {
+      (v.readonly ? readonly : editable).push([k, v.value]);
+    }
+
+    const rowHtml = (k, v, isReadonly) => {
+      const valHtml = v
+        ? `<span class="attr-val-text">${esc(v)}</span>`
+        : `<span class="attr-val-text" style="color:var(--ink-3);font-style:italic">—</span>`;
+      return `<div class="attr-row" data-attr="${esc(k)}" style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);min-height:34px">
+        <span class="mono" style="flex:0 0 220px;font-size:11.5px;color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-right:6px" title="${esc(k)}">${esc(k)}</span>
+        <span class="attr-val" style="flex:1;font-size:12.5px;word-break:break-all;min-width:0">${valHtml}</span>
+        <div style="flex-shrink:0;width:30px;display:flex;justify-content:center">
+          ${!isReadonly
+            ? `<button class="icon-act attr-edit-btn" data-attr="${esc(k)}" title="Muuda atribuut">${icon('edit', 13)}</button>`
+            : `<span style="color:var(--ink-3);display:flex;align-items:center">${icon('lock', 12)}</span>`}
+        </div>
+      </div>`;
+    };
+
+    return `
+      <div style="display:flex;gap:8px;margin-bottom:14px;align-items:center">
+        <input class="input" id="attrs-search" placeholder="Otsi atribuudi nime..." style="flex:1;height:32px;font-size:13px">
+        <button class="btn sm" id="attrs-add-btn" style="flex-shrink:0">${icon('plus', 13)} Lisa atribuut</button>
+      </div>
+
+      <div id="attrs-add-form" class="card" style="display:none;padding:14px;margin-bottom:14px;background:var(--surface-2)">
+        <div style="font-size:12px;font-weight:600;color:var(--ink-2);margin-bottom:10px">Uus atribuut</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+          <div class="field" style="flex:0 0 190px">
+            <label>Atribuudi nimi</label>
+            <input class="input" id="attrs-new-name" placeholder="extensionAttribute1" style="font-family:monospace;font-size:13px">
+          </div>
+          <div class="field" style="flex:1;min-width:150px">
+            <label>Väärtus</label>
+            <input class="input" id="attrs-new-value" placeholder="">
+          </div>
+          <div style="display:flex;gap:6px;padding-bottom:1px">
+            <button class="btn sm primary" id="attrs-new-save">${icon('save', 13)} Lisa</button>
+            <button class="btn sm" id="attrs-new-cancel">Tühista</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="attrs-list">
+        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3);padding:2px 0 6px;display:flex;align-items:center;gap:6px">
+          Muudetavad <span class="badge neutral" style="font-size:10px">${editable.length}</span>
+        </div>
+        ${editable.length ? editable.map(([k, v]) => rowHtml(k, v, false)).join('') : `<div style="font-size:13px;color:var(--ink-3);padding:10px 0">Muudetavaid atribuute ei leitud.</div>`}
+
+        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3);padding:14px 0 6px;margin-top:8px;border-top:1px solid var(--border);display:flex;align-items:center;gap:6px">
+          Kirjutuskaitstud <span class="badge neutral" style="font-size:10px">${readonly.length}</span>
+        </div>
+        ${readonly.map(([k, v]) => rowHtml(k, v, true)).join('')}
+      </div>`;
+  },
+
+  _bindAttrsTabEvents(container, u) {
+    const self = this;
+
+    document.getElementById('attrs-search')?.addEventListener('input', e => {
+      const q = e.target.value.toLowerCase();
+      container.querySelectorAll('.attr-row').forEach(row => {
+        row.style.display = (row.dataset.attr || '').toLowerCase().includes(q) ? '' : 'none';
+      });
+    });
+
+    document.getElementById('attrs-add-btn')?.addEventListener('click', () => {
+      const form = document.getElementById('attrs-add-form');
+      if (!form) return;
+      const show = form.style.display === 'none';
+      form.style.display = show ? '' : 'none';
+      if (show) document.getElementById('attrs-new-name')?.focus();
+    });
+
+    document.getElementById('attrs-new-cancel')?.addEventListener('click', () => {
+      const form = document.getElementById('attrs-add-form');
+      if (form) form.style.display = 'none';
+    });
+
+    document.getElementById('attrs-new-save')?.addEventListener('click', async () => {
+      const nameEl  = document.getElementById('attrs-new-name');
+      const valueEl = document.getElementById('attrs-new-value');
+      const name    = nameEl?.value.trim();
+      const value   = valueEl?.value ?? '';
+      if (!name) { App.toast('warn', 'Atribuudi nimi puudub'); nameEl?.focus(); return; }
+      const btn = document.getElementById('attrs-new-save');
+      if (btn) { btn.disabled = true; btn.innerHTML = `<div class="spinner" style="width:12px;height:12px;display:inline-block"></div>`; }
+      try {
+        await API.setUserAttr(u.sam, name, value);
+        self._attrs[name] = { value, readonly: false };
+        App.toast('ok', 'Atribuut lisatud', name);
+        self._renderDetail(container);
+      } catch (err) {
+        App.toast('bad', 'Viga', err.message);
+        if (btn) { btn.disabled = false; btn.innerHTML = `${icon('save', 13)} Lisa`; }
+      }
+    });
+
+    container.querySelectorAll('.attr-edit-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const row      = btn.closest('.attr-row');
+        if (!row) return;
+        const attrName = row.dataset.attr;
+        const valCell  = row.querySelector('.attr-val');
+        if (!valCell || row.querySelector('.attr-inline-input')) return; // already editing
+
+        const currentVal = self._attrs[attrName]?.value ?? '';
+
+        valCell.innerHTML = `<input class="input attr-inline-input" value="${esc(currentVal)}" style="height:28px;font-size:12.5px;padding:3px 8px;width:100%">`;
+        btn.style.display = 'none';
+
+        const actionsDiv = document.createElement('div');
+        actionsDiv.style.cssText = 'display:flex;gap:4px;flex-shrink:0';
+        actionsDiv.innerHTML = `
+          <button class="btn sm primary attr-save-btn" style="height:26px;font-size:11px;padding:0 8px">Salvesta</button>
+          <button class="btn sm attr-cancel-btn" style="height:26px;font-size:11px;padding:0 8px">✕</button>`;
+        row.appendChild(actionsDiv);
+
+        const input = valCell.querySelector('.attr-inline-input');
+        input?.focus();
+
+        const revertRow = () => {
+          const orig = self._attrs[attrName]?.value ?? '';
+          valCell.innerHTML = orig
+            ? `<span class="attr-val-text">${esc(orig)}</span>`
+            : `<span class="attr-val-text" style="color:var(--ink-3);font-style:italic">—</span>`;
+          btn.style.display = '';
+          actionsDiv.remove();
+        };
+
+        const saveAttr = async () => {
+          const newVal = input?.value ?? '';
+          const saveBtn = actionsDiv.querySelector('.attr-save-btn');
+          if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '…'; }
+          try {
+            await API.setUserAttr(u.sam, attrName, newVal);
+            self._attrs[attrName].value = newVal;
+            App.toast('ok', 'Salvestatud', attrName);
+            revertRow(); // reads updated _attrs value, so shows newVal
+          } catch (err) {
+            App.toast('bad', 'Viga', err.message);
+            if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Salvesta'; }
+          }
+        };
+
+        input?.addEventListener('keydown', e => {
+          if (e.key === 'Enter')  saveAttr();
+          if (e.key === 'Escape') revertRow();
+        });
+
+        actionsDiv.querySelector('.attr-save-btn')?.addEventListener('click', saveAttr);
+        actionsDiv.querySelector('.attr-cancel-btn')?.addEventListener('click', revertRow);
+      });
+    });
+  },
+
   // ── Checklist helpers ────────────────────────────────────────────────────────
 
   _buildLocalEntries() {
@@ -605,7 +830,7 @@ Views.UserDetail = {
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
             <span style="font-weight:600;font-size:13px">${esc(e.svc.name)}</span>
-            <span style="font-size:10.5px;color:#6a1b9a;font-weight:500">kohalik</span>
+            <span style="font-size:10.5px;color:var(--tag-local-ink);font-weight:500">kohalik</span>
           </div>
           <div style="font-size:11.5px;color:var(--ink-2);margin-top:2px">
             Kasutaja roll: <b>${esc(e.roles.join(', '))}</b>

@@ -342,6 +342,19 @@ Views.Users = {
               <label>Dokumendi NR / Ringkäigu lehe NR</label>
               <input class="input mono" id="f-docnr" value="${esc(user?.employeeNumber||'')}" placeholder="D-2024-001" autocomplete="off" />
             </div>
+            <div class="field full">
+              <label>Profiilipilt</label>
+              <div style="display:flex;align-items:center;gap:14px">
+                <div id="f-photo-preview" style="width:56px;height:56px;border-radius:50%;${user?.photo ? `background:url('${user.photo}') center/cover no-repeat` : 'background:var(--surface-3)'};display:grid;place-items:center;flex-shrink:0;border:1px solid var(--border)">
+                  ${user?.photo ? '' : icon('users',22)}
+                </div>
+                <div style="display:flex;flex-direction:column;gap:6px">
+                  <input type="file" id="f-photo" accept="image/jpeg,image/png,image/webp" style="display:none">
+                  <button type="button" class="btn sm" id="f-photo-btn">${icon('upload',14)} Vali foto</button>
+                  <span class="hint">JPEG/PNG, kuni 150 KB. Vabatahtlik.</span>
+                </div>
+              </div>
+            </div>
             <div class="field">
               <label>Eesnimi <span class="req">*</span></label>
               <input class="input" id="f-first" value="${esc(user?.givenName||'')}" placeholder="Mari" autocomplete="off" />
@@ -623,6 +636,26 @@ Views.Users = {
       document.getElementById('f-enabled-lbl').textContent = e.target.checked ? 'Konto lubatud' : 'Konto keelatud';
     });
 
+    // ── Foto preview ──
+    let _photoDataUrl = null;
+    document.getElementById('f-photo-btn')?.addEventListener('click', () => {
+      document.getElementById('f-photo')?.click();
+    });
+    document.getElementById('f-photo')?.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      if (file.size > 10 * 1024 * 1024) { App.toast('warn', 'Fail liiga suur', 'Maksimaalselt 10 MB'); e.target.value = ''; return; }
+      const reader = new FileReader();
+      reader.onload = async (ev) => {
+        try {
+          _photoDataUrl = await resizePhoto(ev.target.result, 128, 0.90);
+          const prev = document.getElementById('f-photo-preview');
+          if (prev) { prev.innerHTML = ''; prev.style.backgroundImage = `url('${_photoDataUrl}')`; prev.style.backgroundSize = 'cover'; prev.style.backgroundPosition = 'center'; }
+        } catch (err) { App.toast('warn', 'Pildi töötlus ebaõnnestus', err.message); }
+      };
+      reader.readAsDataURL(file);
+    });
+
     // ── Save ──
     document.getElementById('form-save').addEventListener('click', async () => {
       const fn      = document.getElementById('f-first').value.trim();
@@ -684,14 +717,21 @@ Views.Users = {
             manager, ou, enabled, employeeID:empid||undefined, employeeNumber:docnr||undefined,
             telephoneNumber:phone||undefined });
 
-          // Sync group membership
-          const oldGroups = user.groups || [];
+          // Sync group membership — only touch groups we manage (allGroups).
+          // user.groups may include AD built-in/unmanaged groups outside GROUPS_OU;
+          // trying to remove those causes a 404 from searchGroups.
+          const managedNames = new Set(allGroups.map(g => g.name));
+          const oldGroups = (user.groups || []).filter(g => managedNames.has(g));
           const toAdd     = selGroups.filter(g => !oldGroups.includes(g));
           const toRemove  = oldGroups.filter(g => !selGroups.includes(g) && g !== 'Haigla-Kõik');
           await Promise.allSettled([
             ...toAdd.map(g => API.addToGroup(sam, g)),
             ...toRemove.map(g => API.removeFromGroup(sam, g)),
           ]);
+
+          if (_photoDataUrl) {
+            await API.uploadUserPhoto(sam, _photoDataUrl).catch(e => App.toast('warn', 'Foto salvestamine ebaõnnestus', e.message));
+          }
 
           App.toast('ok', 'Kasutaja uuendatud', fn + ' ' + ln);
         } else if (isRequest) {
@@ -709,12 +749,18 @@ Views.Users = {
           const result = await API.createUser({
             username:sam, givenName:fn, sn:ln, mail, password:pass,
             department:dept, title:titleV, manager, ou, enabled,
-            telephoneNumber:phone||undefined, employeeNumber:docnr||undefined, sendSms,
+            telephoneNumber:phone||undefined, employeeNumber:docnr||undefined,
+            employeeID:empid||undefined, sendSms,
           });
 
           // Add to extra groups (Haigla-Kõik lisatakse serveris automaatselt)
           const extraGroups = selGroups.filter(g => g !== 'Haigla-Kõik');
           await Promise.allSettled(extraGroups.map(g => API.addToGroup(sam, g)));
+
+          // Upload photo if selected
+          if (_photoDataUrl) {
+            await API.uploadUserPhoto(sam, _photoDataUrl).catch(() => {});
+          }
 
           // SMS tagasiside
           if (sendSms) {
@@ -730,7 +776,12 @@ Views.Users = {
           App.toast('ok', 'Kasutaja loodud', fn + ' ' + ln + ' · ' + sam);
         }
         close();
-        if (container) await self.render(container, {});
+        if (container) {
+          await self.render(container, {});
+        } else if (isEdit) {
+          // Opened from userDetail — re-render that view to reflect changes
+          App.navigate('userDetail', { sam });
+        }
       } catch (err) {
         App.toast('bad', 'Viga', err.message);
         btn.disabled = false;

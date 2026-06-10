@@ -58,9 +58,31 @@ function initials(name) {
   return ((parts[0]?.[0]||'') + (parts[1]?.[0]||'')).toUpperCase() || '?';
 }
 
+// Resize + compress an image dataUrl to fit within maxPx × maxPx, output as JPEG
+function resizePhoto(dataUrl, maxPx, quality) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onerror = () => reject(new Error('Pildi laadimine ebaõnnestus'));
+    img.onload = () => {
+      const scale = Math.min(1, maxPx / Math.max(img.width, img.height));
+      const w = Math.round(img.width  * scale);
+      const h = Math.round(img.height * scale);
+      const canvas = document.createElement('canvas');
+      canvas.width  = w;
+      canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL('image/jpeg', quality ?? 0.85));
+    };
+    img.src = dataUrl;
+  });
+}
+
 function avatar(user, size) {
   const sz = size || 36;
   const fs = Math.round(sz * 0.38);
+  if (user.photo) {
+    return `<img class="avatar" src="${user.photo}" alt="${esc(initials(user.displayName))}" style="width:${sz}px;height:${sz}px;object-fit:cover;display:block">`;
+  }
   return `<div class="avatar" style="width:${sz}px;height:${sz}px;background:${esc(user.avatarColor||'#5e1d27')};font-size:${fs}px">${esc(initials(user.displayName))}</div>`;
 }
 

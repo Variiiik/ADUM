@@ -44,6 +44,15 @@ function mapUser(e) {
     : [];
 
   const dn = str(e, 'distinguishedName');
+
+  const rawPhoto = e.thumbnailPhoto ?? e.thumbnailphoto ?? e.photo;
+  let photo = null;
+  if (Buffer.isBuffer(rawPhoto)) {
+    photo = 'data:image/jpeg;base64,' + rawPhoto.toString('base64');
+  } else if (typeof rawPhoto === 'string' && rawPhoto.startsWith('data:')) {
+    photo = rawPhoto;
+  }
+
   return {
     sam,
     displayName:       str(e, 'displayName'),
@@ -66,6 +75,7 @@ function mapUser(e) {
     pwNeverExpires:    !!(uac & 0x10000),
     mustChangePw:      str(e, 'pwdLastSet') === '0',
     groups,
+    photo,
     avatarColor:       e.avatarColor || '#2563eb',
   };
 }
@@ -99,7 +109,7 @@ router.get('/', async (req, res) => {
     }
     const attrs = ['sAMAccountName','displayName','givenName','sn','mail','department','title',
       'userAccountControl','lockoutTime','lastLogon','telephoneNumber','distinguishedName','memberOf',
-      'userPrincipalName','employeeID','employeeNumber','pwdLastSet'];
+      'userPrincipalName','employeeID','employeeNumber','pwdLastSet','thumbnailPhoto'];
     let results = await lc.searchUsers(filter, attrs);
     let users   = results.map(mapUser).filter(Boolean);
     if (dept)   users = users.filter(u => u.department === dept);
@@ -121,7 +131,9 @@ router.get('/:sam', async (req, res) => {
       if (!u) return res.status(404).json({ error: 'Kasutajat ei leitud.' });
       return res.json({ user: { ...u, status: lc.computeStatus(u.userAccountControl, u.lockoutTime) } });
     }
-    const r = await lc.searchUsers(`(&(objectClass=user)(objectCategory=person)(sAMAccountName=${lc.escapeLdap(sam)}))`, ['*']);
+    // thumbnailPhoto must be explicitly requested — AD does not return it with ['*']
+    const r = await lc.searchUsers(`(&(objectClass=user)(objectCategory=person)(sAMAccountName=${lc.escapeLdap(sam)}))`,
+      ['*', 'thumbnailPhoto']);
     if (!r.length) return res.status(404).json({ error: 'Kasutajat ei leitud.' });
     res.json({ user: mapUser(r[0]) });
   } catch (err) {
@@ -172,7 +184,7 @@ router.put('/:sam', async (req, res) => {
   const { sam } = req.params;
   const actor   = req.session.user.sam;
   if (!validateSam(sam)) return res.status(400).json({ error: 'Vigane kasutajanimi.' });
-  const { givenName, sn, mail, department, title, manager, employeeNumber } = req.body;
+  const { givenName, sn, mail, department, title, manager, employeeNumber, employeeID } = req.body;
 
   try {
     if (lc.MOCK_AD) {
@@ -188,6 +200,7 @@ router.put('/:sam', async (req, res) => {
       if (title !== undefined)           u.title = title;
       if (manager !== undefined)         u.manager = manager;
       if (employeeNumber !== undefined)  u.employeeNumber = employeeNumber;
+      if (employeeID    !== undefined)  u.employeeID     = employeeID;
       audit.logEvent(actor, 'MODIFY_USER', sam, 'success');
       return res.json({ ok: true });
     }
@@ -211,6 +224,7 @@ router.put('/:sam', async (req, res) => {
       { op: 'replace', type: 'department',     val: department },
       { op: 'replace', type: 'title',          val: title },
       { op: 'replace', type: 'employeeNumber', val: employeeNumber },
+      { op: 'replace', type: 'employeeID',     val: employeeID },
       manager !== undefined ? { op: manager ? 'replace' : 'delete', type: 'manager', val: manager || undefined } : null,
     ]);
 
@@ -458,7 +472,10 @@ router.post('/:sam/groups/remove', async (req, res) => {
       lc.searchGroups(`(&(objectClass=group)(cn=${lc.escapeLdap(groupName)}))`, ['distinguishedName']),
     ]);
     if (!uRes.length) return res.status(404).json({ error: 'Kasutajat ei leitud.' });
-    if (!gRes.length) return res.status(404).json({ error: 'Gruppi ei leitud.' });
+    if (!gRes.length) {
+      console.warn(`[groups/remove] Gruppi "${groupName}" ei leitud GROUPS_OU-st — vahele jätmine`);
+      return res.json({ ok: true, skipped: true });
+    }
 
     const groupDN2 = getDN(gRes);
     const userDN3  = getDN(uRes);
@@ -473,6 +490,241 @@ router.post('/:sam/groups/remove', async (req, res) => {
   } catch (err) {
     audit.logEvent(actor, 'GROUP_REMOVE', sam, 'failure', err.message);
     res.status(500).json({ error: 'Grupist eemaldamine ebaõnnestus.' });
+  }
+});
+
+// ─── Attribute editor (admin only) ───────────────────────────────────────────
+
+const BLOCKED_ATTRS = new Set([
+  // Identity / naming
+  'cn','name','distinguishedname','objectclass','objectcategory',
+  'objectguid','objectsid','samaccountname','samaccounttype',
+  'canonicalname','structuralobjectclass','objectversion','instancetype',
+  'securityidentifier',
+  // Passwords / credentials
+  'unicodepwd','lmpwdhistory','ntpwdhistory','dbcspwd',
+  'supplementalcredentials','userpassword','unixuserpassword',
+  'usercert','usercertificate','userpkcs12','usersmimecertificate',
+  'altsecurityidentities',
+  // PKI / key material
+  'mspkiaccountcredentials','mspkidpapimasterkeys','mspkiroamingtimestamp',
+  'mspki-credentialroamingtokens','msds-keycredentiallink',
+  'msmqdigests','msmqdigestsmig','msmqsigncertificates','msmqsigncertificatesmig',
+  'attributecertificateattribute',
+  // Account state (managed via app UI)
+  'useraccountcontrol','pwdlastset',
+  'badpwdcount','badpasswordtime','lockouttime','logoncount',
+  'lastlogon','lastlogontimestamp','lastlogoff','accountexpires',
+  'msds-user-account-control-computed','msds-userpasswordexpirytimecomputed',
+  'msds-failedinteractivelogoncount',
+  'msds-failedinteractivelogoncountatLastsuccessfullogon',
+  'msds-lastfailedinteractivelogontime','msds-lastsuccessfulinteractivelogontime',
+  // Timestamps / replication metadata
+  'whencreated','whenchanged','createtimestamp','modifytimestamp',
+  'usnchanged','usncreated','usndsalastobjremoved','usnlastobjrem','usnsource','usnintersite',
+  'dscorepropagationdata','dsasignature',
+  'replpropertymetadata','repluptodatevector','repsfrom','repsto',
+  'partialattributiondeletionlist','partialattributeset',
+  'msds-replattributemetadata','msds-replvaluemetadata','msds-replvaluemetadataext',
+  'msds-ncreplicursors','msds-ncreplinboundneighbors','msds-ncreploutboundneighbors',
+  'msds-nc-ro-replica-locations-bl',
+  'msds-cached-membership','msds-cached-membership-time-stamp',
+  // Computed / operational (read-only by AD)
+  'tokengroups','tokengroupsglobalanduniversal','tokengroupsnogcacceptable',
+  'msds-tokengroupnames','msds-tokengroupnamesglobalanduniversal',
+  'msds-tokengroupnamesnogcacceptable',
+  'allowedattributes','allowedattributeseffective',
+  'allowedchildclasses','allowedchildclasseseffective',
+  'sdrightseffective','msds-resultantpso','msds-psoapplied',
+  'groupmembershipsam','msds-approx-immed-subordinates',
+  'possibleinferiors','subrefs','subschemasubentry',
+  'msds-principalname','msds-jetgetrecordsize3',
+  // System flags / lifecycle
+  'systemflags','iscriticalsystemobject','isdeleted','isrecycled',
+  'revision','rid','fromentry','lastknownparent','proxiedobjectname',
+  // Security
+  'ntsecuritydescriptor','sidhistory','accountnamehistory','primarygroupid',
+  // Group membership (managed via groups tab)
+  'memberof','member',
+  // Backlink attributes (set by AD on referenced objects, not directly writable)
+  'directreports','managedobjects','masteredby','msds-masteredby',
+  'ownerbl','querypolicybl','nonsecuritymemberbl','siteobjectbl',
+  'bridgeheadserverlistbl','netbootscpbl','serverreferencebl',
+  'frscomputerreferencebl','frsmemberreferencebl',
+  'msdfsrcomputerreferencebl','msdfsrmemberreferencebl',
+  'msds-enabledfeaturebl','msds-hostserviceaccountbl',
+  'msds-isdomainfor','msds-isfullreplicafor','msds-ispartialreplicafor',
+  'msds-isprimarycomputerfor','msds-keyprincipalbl','msds-krbtgtlinkbl',
+  'msds-managedaccountprecededbylinkbl',
+  'msds-membersforazrolebl','msds-membersofresourcepropertylistbl',
+  'msds-nonmembersbl','msds-objectreferencebl',
+  'msds-operationsforazrolebl','msds-operationsforaztaskbl',
+  'msds-tasksforazrolebl','msds-tasksforaztaskbl',
+  'msds-tdoingressbl','msds-tdoegressbl','msds-valuetypereferencerebl',
+  'msds-authntpolicysilomembersbl','msds-authenticatedtoaccountlist',
+  'msds-authenticatedatdc','msds-claimsharespossiblevalueswithbl',
+  'msds-supersededmanagedaccountlinkbl','msds-oidtogrouplinkkbl',
+  'mssfu30posixmemberof','wellknownobjects','otherwellknownobjects',
+  'fsmoroleowner','controlaccessrights',
+]);
+
+function attrToString(v) {
+  if (v == null) return '';
+  if (Buffer.isBuffer(v)) return '(binary) ' + v.toString('hex').toUpperCase().replace(/(.{2})/g, '$1 ').trim().slice(0, 95);
+  if (Array.isArray(v)) {
+    if (!v.length) return '';
+    if (Buffer.isBuffer(v[0])) {
+      const hex = v[0].toString('hex').toUpperCase().replace(/(.{2})/g, '$1 ').trim().slice(0, 95);
+      return `(binary) ${hex}${v.length > 1 ? ` … +${v.length - 1}` : ''}`;
+    }
+    return v.join('; ');
+  }
+  return String(v);
+}
+
+// GET /api/users/:sam/attrs — all raw AD attributes
+router.get('/:sam/attrs', requireAdmin, async (req, res) => {
+  const { sam } = req.params;
+  if (!validateSam(sam)) return res.status(400).json({ error: 'Vigane kasutajanimi.' });
+  try {
+    if (lc.MOCK_AD) {
+      const u = lc.MOCK_USERS.find(x => x.sam === sam);
+      if (!u) return res.status(404).json({ error: 'Kasutajat ei leitud.' });
+      const attrs = {};
+      for (const [k, v] of Object.entries(u)) {
+        if (k === 'groups') continue;
+        attrs[k] = { value: String(v ?? ''), readonly: BLOCKED_ATTRS.has(k.toLowerCase()) };
+      }
+      return res.json({ attrs });
+    }
+    const r = await lc.searchUsers(
+      `(&(objectClass=user)(sAMAccountName=${lc.escapeLdap(sam)}))`,
+      ['*']
+    );
+    if (!r.length) return res.status(404).json({ error: 'Kasutajat ei leitud.' });
+    // normaliseEntry adds both camelCase and lowercase copies — deduplicate by lowercase key
+    const attrs = {};
+    const seen  = new Set();
+    for (const [k, v] of Object.entries(r[0])) {
+      const lk = k.toLowerCase();
+      if (seen.has(lk)) continue;
+      seen.add(lk);
+      attrs[k] = { value: attrToString(v), readonly: BLOCKED_ATTRS.has(lk) };
+    }
+    res.json({ attrs });
+  } catch (err) {
+    console.error('[users] attrs get:', err.message);
+    res.status(500).json({ error: 'Atribuutide laadimine ebaõnnestus.' });
+  }
+});
+
+// PATCH /api/users/:sam/attrs — set single attribute
+router.patch('/:sam/attrs', requireAdmin, async (req, res) => {
+  const { sam }  = req.params;
+  const actor    = req.session.user.sam;
+  const { attr, value } = req.body;
+  if (!validateSam(sam)) return res.status(400).json({ error: 'Vigane kasutajanimi.' });
+  if (!attr || typeof attr !== 'string' || !/^[\w-]{1,128}$/.test(attr))
+    return res.status(400).json({ error: 'Vigane atribuudi nimi.' });
+  if (BLOCKED_ATTRS.has(attr.toLowerCase()))
+    return res.status(403).json({ error: 'Seda atribuuti ei saa muuta.' });
+  try {
+    if (lc.MOCK_AD) {
+      const u = lc.MOCK_USERS.find(x => x.sam === sam);
+      if (!u) return res.status(404).json({ error: 'Kasutajat ei leitud.' });
+      if (value === '' || value == null) delete u[attr];
+      else u[attr] = String(value);
+      audit.logEvent(actor, 'MODIFY_ATTR', sam, 'success', `${attr}=${value ?? ''}`);
+      return res.json({ ok: true });
+    }
+    const r = await lc.searchUsers(
+      `(&(objectClass=user)(sAMAccountName=${lc.escapeLdap(sam)}))`,
+      ['distinguishedName']
+    );
+    if (!r.length) return res.status(404).json({ error: 'Kasutajat ei leitud.' });
+    const client = lc.createClient();
+    await bind(client);
+    const op = (value === '' || value == null) ? 'delete' : 'replace';
+    await ldapModify(client, getDN(r), ldapChanges([
+      { op, type: attr, val: op === 'delete' ? null : String(value) }
+    ]));
+    client.unbind();
+    audit.logEvent(actor, 'MODIFY_ATTR', sam, 'success', `${attr}=${value ?? ''}`);
+    res.json({ ok: true });
+  } catch (err) {
+    audit.logEvent(actor, 'MODIFY_ATTR', sam, 'failure', err.message);
+    console.error('[users] attrs patch:', err.message);
+    res.status(500).json({ error: err.message || 'Atribuudi muutmine ebaõnnestus.' });
+  }
+});
+
+// POST /api/users/:sam/photo — set profile photo (admin only)
+router.post('/:sam/photo', requireAdmin, async (req, res) => {
+  const { sam } = req.params;
+  const actor   = req.session.user.sam;
+  const { dataUrl } = req.body;
+  if (!validateSam(sam)) return res.status(400).json({ error: 'Vigane kasutajanimi.' });
+  if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/'))
+    return res.status(400).json({ error: 'Vigane foto formaat.' });
+  const base64 = dataUrl.replace(/^data:image\/[a-z+]+;base64,/, '');
+  const buf    = Buffer.from(base64, 'base64');
+  if (buf.length > 150 * 1024)
+    return res.status(413).json({ error: 'Foto on liiga suur (max 150 KB).' });
+  try {
+    if (lc.MOCK_AD) {
+      const u = lc.MOCK_USERS.find(x => x.sam === sam);
+      if (!u) return res.status(404).json({ error: 'Kasutajat ei leitud.' });
+      u.photo = dataUrl;
+      return res.json({ ok: true });
+    }
+    const r = await lc.searchUsers(
+      `(&(objectClass=user)(sAMAccountName=${lc.escapeLdap(sam)}))`, ['distinguishedName']
+    );
+    if (!r.length) return res.status(404).json({ error: 'Kasutajat ei leitud.' });
+    const dn = getDN(r);
+    const ldapjs = require('ldapjs');
+    const client = lc.createClient();
+    await bind(client);
+    await ldapModify(client, dn, [new ldapjs.Change({
+      operation: 'replace',
+      modification: { type: 'thumbnailPhoto', values: [buf] },
+    })]);
+    client.unbind();
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[users] photo set:', err.message);
+    res.status(500).json({ error: 'Foto salvestamine ebaõnnestus.' });
+  }
+});
+
+// DELETE /api/users/:sam/photo — remove profile photo (admin only)
+router.delete('/:sam/photo', requireAdmin, async (req, res) => {
+  const { sam } = req.params;
+  const actor   = req.session.user.sam;
+  if (!validateSam(sam)) return res.status(400).json({ error: 'Vigane kasutajanimi.' });
+  try {
+    if (lc.MOCK_AD) {
+      const u = lc.MOCK_USERS.find(x => x.sam === sam);
+      if (!u) return res.status(404).json({ error: 'Kasutajat ei leitud.' });
+      delete u.photo;
+      return res.json({ ok: true });
+    }
+    const r = await lc.searchUsers(
+      `(&(objectClass=user)(sAMAccountName=${lc.escapeLdap(sam)}))`, ['distinguishedName']
+    );
+    if (!r.length) return res.status(404).json({ error: 'Kasutajat ei leitud.' });
+    const ldapjs = require('ldapjs');
+    const client = lc.createClient();
+    await bind(client);
+    await ldapModify(client, getDN(r), [new ldapjs.Change({
+      operation: 'delete',
+      modification: { type: 'thumbnailPhoto', values: [] },
+    })]);
+    client.unbind();
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[users] photo delete:', err.message);
+    res.status(500).json({ error: 'Foto kustutamine ebaõnnestus.' });
   }
 });
 

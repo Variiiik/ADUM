@@ -1,99 +1,105 @@
-# AD Kasutajahaldus
+# ADUM — AD Kasutajahaldus
 
-Active Directory kasutajate haldamise veebirakendus. Mõeldud haigla IT- ja personaliosakonnale — võimaldab hallata AD kontosid ilma `dsa.msc` avamata.
+Active Directory kasutajate ja teenuste õiguste haldamise veebirakendus.  
+Mõeldud haigla IT- ja personaliosakonnale — võimaldab hallata AD kontosid ilma `dsa.msc` avamata.
 
 ---
 
 ## Funktsioonid
 
+### Kasutajate haldus
 | Funktsioon | Kirjeldus |
 |---|---|
-| **Kasutajate haldus** | Loomine, muutmine, kustutamine, otsimine ja filtreerimine |
-| **Konto toimingud** | Luba/keela, ava lukk, lähtesta parool |
-| **Grupihaldu** | Kasutaja lisamine/eemaldamine gruppidest loomisel ja profiilis |
-| **Auditilogi** | Kõik toimingud logitakse ajatempliga, eksporditav CSV-na |
-| **Seaded** | LDAP, e-post, SMS ja kirja mallid veebiliidesest |
-| **Mock-režiim** | Täielikult kasutatav ilma päris AD-ta — arendusteks |
-| **Kohalik admin** | Sisselogimine töötab ka AD mahavõtmisel |
-| **Turvaline** | CSRF, rate limiting, LDAPS, session httpOnly, Helmet CSP |
+| Loomine | Eesnimi, perekonnanimi, kasutajanimi, e-post, osakond, ametinimetus, juht, telefon, **dokumendi NR / ringkäigu lehe NR**, OU valik |
+| Muutmine | Kõik andmeväljad, grupikuuluvused |
+| Kustutamine | Koos **ringkäigu kontrollnimekirjaga** — näitab kohalikud teenused ja nõuab linnukesi enne kustutamist |
+| Otsimine | Nimi, kasutajanimi, e-post, osakond, olek |
+| Konto toimingud | Luba/keela (koos kohalike teenuste kontrolliga), ava lukk, lähtesta parool |
+| SMS | Uue konto ja parooli vahetamise teavitused (Twilio) |
+
+### Teenuste õiguste haldus
+| Funktsioon | Kirjeldus |
+|---|---|
+| Teenused | AD-ga lingitud (grupiliikmelisus) ja kohalikud (manuaalsed) teenused |
+| Õiguste grupid | Iga teenuse all nummereeritud grupid, liikmed näevad AD atribuudis oma rolli |
+| AD atribuut | Koodformaadis rollid: `RAP:OT` (omanik + tehniline), `ERP:1L` (1. grupi liige) |
+| Sünkroonimine | Lisa/eemalda liige → AD atribuut uuendatakse automaatselt |
+
+### Taotluste töövoog (HR ↔ Admin)
+| Tüüp | Kirjeldus |
+|---|---|
+| Uus konto | HR esitab, admin kinnitab ja loob konto |
+| Muutmine | HR esitab muutmistaotluse, admin kinnitab ja rakendab |
+| Keelamine | HR taotleb konto keelamist |
+| Kustutamine | HR taotleb konto kustutamist |
+
+### Rollid
+| Roll | Ligipääs |
+|---|---|
+| **Admin** | Täielik ligipääs — kõik toimingud otse |
+| **HR** | Kasutajad ja teenused lugemisõigusega, taotluste esitamine |
+| **Kohalik admin** | AD-st sõltumatu varusisselogimine |
+
+### Tehniline
+- CSRF kaitse, rate limiting, Helmet CSP, LDAPS tugi
+- Sessioonid MySQL-is (`express-mysql-session`) — ei leki mälu
+- Auditilogi kõigi toimingute kohta
+- Mock-režiim arenduseks ilma AD-ta
 
 ---
 
 ## Nõuded
 
-- **Node.js** 18 või uuem
-- **Active Directory** (Windows Server 2016+) — või mock-režiim arenduseks
-- LDAPS (port 636) juurdepääs DC-le — AD nõuab TLS-i kasutajaandmete muutmiseks
-- Teenuskonto AD-s kirjutamisõigustega (vt [AD seadistus](#ad-seadistus))
+- **Node.js** 22 või uuem
+- **MySQL / MariaDB** 10.6 või uuem
+- **Active Directory** (Windows Server 2016+) — või mock-režiim
+- LDAPS (port 636) juurdepääs domeenikontrollerile
+- Teenuskonto AD-s kirjutamisõigustega
 
 ---
 
-## Kiirkäivitus
+## Kiirkäivitus (arendus)
 
 ```bash
 git clone <repo>
 cd ad-usermanager
 npm install
 cp .env.example .env
-# Muutke .env faili (vt allpool)
+# Muuda .env — mock-režiimiks piisab MOCK_AD=true
 npm run dev
 ```
 
-Avage brauser: `http://localhost:3001`
-
-**Mock-režiimi sisselogimine:** `admin` / `admin123`
+Ava brauser: `http://localhost:3000`  
+Mock-sisselogimine: `admin` / `admin123`
 
 ---
 
 ## Konfiguratsioon (.env)
 
-```env
-# ── LDAP / Active Directory ──────────────────────────────────────────────────
-LDAP_URL=ldaps://192.168.1.10:636        # ldap:// (389) või ldaps:// (636 TLS)
-LDAP_TLS_VERIFY=false                    # false = lubab ise-allkirjastatud serte (sisevõrk)
-LDAP_BASE_DN=DC=varik,DC=local           # Domeeni juur
-LDAP_BIND_DN=CN=svc-ad,OU=Bind,OU=Main,DC=varik,DC=local  # Teenuskonto DN
-LDAP_BIND_PASS=SalajaneParool           # Teenuskonto parool
-LDAP_USERS_OU=OU=Users,OU=Main,DC=varik,DC=local          # Kasutajate OU (lugemine + loomine)
-LDAP_GROUPS_OU=OU=Groups,OU=Main,DC=varik,DC=local        # Gruppide OU
+Kopeeri `.env.example` → `.env` ja täida väljad. Kommentaarid on `.env.example`-s.
 
-# ── Juurdepääsu kontroll ──────────────────────────────────────────────────────
-LDAP_ADMIN_GROUP=ADUM_admin              # AD grupp kellel on rakendusele ligipääs
-                                         # Tühjaks jättes saavad kõik AD kasutajad sisse logida
-LDAP_UPN_SUFFIX=varik.local             # UPN sufiks (kui erineb BASE_DN-st, muidu tühi)
-LDAP_EXTRA_DOMAINS=varik.ee,test.varik.local  # Lisadomeenid e-posti valikule (komaga eraldatud)
-
-# ── Rakendus ──────────────────────────────────────────────────────────────────
-PORT=3001
-NODE_ENV=production                      # production | development
-HTTPS=false                              # true = küpsis ainult HTTPS üle (reverse proxy taga)
-SESSION_SECRET=<64-char-random-string>   # Sessiooni allkirjastamisvõti
-
-# ── Kohalik admin (AD-st sõltumatu) ──────────────────────────────────────────
-LOCAL_ADMIN_USER=localadmin              # Kohalik admini kasutajanimi
-LOCAL_ADMIN_PASS=TugEvParool123!        # Kohalik admini parool
-
-# ── Arendus ───────────────────────────────────────────────────────────────────
-MOCK_AD=false                            # true = mock-andmed, false = päris AD
-LDAP_DEBUG=false                         # true = LDAP päringute detailne logi konsoolis
-```
-
-### SESSION_SECRET genereerimine
-
-```bash
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-```
+| Muutuja | Näide | Kirjeldus |
+|---|---|---|
+| `SESSION_SECRET` | *(48-baidi hex)* | `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"` |
+| `DB_HOST` / `DB_USER` / `DB_PASS` | `localhost` / `adum` / `…` | MariaDB ühendus |
+| `LDAP_URL` | `ldaps://dc01.haigla.vmh.ee:636` | LDAPS soovitatav |
+| `LDAP_BIND_DN` | `CN=svc-admanager,OU=…` | Teenuskonto täis-DN |
+| `LDAP_ADMIN_GROUP` | `ADUM-Admins` | AD grupp administraatoritele |
+| `LDAP_HR_GROUP` | `ADUM-HR` | AD grupp HR kasutajatele |
+| `HTTPS` | `true` | Sea `true` kui Nginx teeb SSL-i |
+| `TRUST_PROXY` | `true` | Sea `true` pöördpuhverserveri taga |
+| `MOCK_AD` | `false` | `true` = mock-andmed arenduseks |
 
 ---
 
-## Käivitamine
+## Tootmispaigaldus
+
+Vt **[DEPLOY.md](DEPLOY.md)** — samm-sammuline juhend Debian 13 serverile:  
+Node.js 22, MariaDB, PM2, Nginx pöördpuhverserver, Let's Encrypt SSL, tulemüür.
 
 ```bash
-# Arendus (nodemon — automaatne taaskäivitus)
-npm run dev
-
-# Tootmine
-npm start
+npm ci --omit=dev
+pm2 start ecosystem.config.js --env production
 ```
 
 ---
@@ -103,66 +109,46 @@ npm start
 ### Teenuskonto loomine
 
 ```powershell
-# Käivita DC-l administraatorina
-
-# Loo OU teenuskontodele (kui pole olemas)
-New-ADOrganizationalUnit -Name "Bind" -Path "OU=Main,DC=varik,DC=local"
-
-# Loo teenuskonto
 New-ADUser -Name "svc-admanager" `
   -SamAccountName "svc-admanager" `
-  -UserPrincipalName "svc-admanager@varik.local" `
-  -Path "OU=Bind,OU=Main,DC=varik,DC=local" `
-  -AccountPassword (ConvertTo-SecureString "SalajaneParool" -AsPlainText -Force) `
-  -PasswordNeverExpires $true `
-  -Enabled $true
+  -UserPrincipalName "svc-admanager@haigla.vmh.ee" `
+  -Path "OU=Service Accounts,DC=haigla,DC=vmh,DC=ee" `
+  -AccountPassword (ConvertTo-SecureString "TugEvParool123!" -AsPlainText -Force) `
+  -PasswordNeverExpires $true -Enabled $true
 ```
 
 ### Vajalikud õigused
 
 ```powershell
-$svc      = "CN=svc-admanager,OU=Bind,OU=Main,DC=varik,DC=local"
-$usersOU  = "OU=Users,OU=Main,DC=varik,DC=local"
-$groupsOU = "OU=Groups,OU=Main,DC=varik,DC=local"
+$svc      = "CN=svc-admanager,OU=Service Accounts,DC=haigla,DC=vmh,DC=ee"
+$usersOU  = "OU=Kasutajad,DC=haigla,DC=vmh,DC=ee"
+$groupsOU = "OU=Grupid,DC=haigla,DC=vmh,DC=ee"
 
-# Kasutajate OU — lugemine, loomine, muutmine, parooli lähtestamine
-dsacls $usersOU /G "${svc}:GR"                      # Read
-dsacls $usersOU /G "${svc}:CCDC;user"               # Create/Delete user objects
-dsacls $usersOU /G "${svc}:WP"                      # Write all properties
-dsacls $usersOU /G "${svc}:CA;Reset Password;user"  # Reset password
-
-# Gruppide OU — liikmete muutmine
-dsacls $groupsOU /G "${svc}:WP;member;group"        # Write members
-```
-
-### LDAP admin grupp
-
-```powershell
-# Loo grupp rakenduse kasutajatele
-New-ADGroup -Name "ADUM_admin" `
-  -GroupScope Global `
-  -GroupCategory Security `
-  -Path "OU=Groups,OU=Main,DC=varik,DC=local"
-
-# Lisa IT admin(id) gruppi
-Add-ADGroupMember -Identity "ADUM_admin" -Members "Klaus.Varik"
+dsacls $usersOU /G "${svc}:GR"                      # Lugemine
+dsacls $usersOU /G "${svc}:CCDC;user"               # Loo/kustuta kasutajad
+dsacls $usersOU /G "${svc}:WP"                      # Muuda atribuute
+dsacls $usersOU /G "${svc}:CA;Reset Password;user"  # Lähtesta parool
+dsacls $groupsOU /G "${svc}:WP;member;group"        # Muuda grupiliikmeid
 ```
 
 ### LDAPS aktiveerimine
 
-LDAPS (port 636) vajab DC-l kehtivat sertifikaati. Lihtsaim viis:
-
 ```powershell
-# Installi Active Directory Certificate Services roll DC-le
 Install-WindowsFeature AD-Certificate -IncludeManagementTools
-
-# Seejärel taaskäivita — DC genereerib automaatselt ise-allkirjastatud serdi LDAPS jaoks
 Restart-Computer
+Test-NetConnection -ComputerName dc01.haigla.vmh.ee -Port 636
 ```
 
-Kontrolli kas LDAPS töötab:
+### Rakenduse AD grupid
+
 ```powershell
-Test-NetConnection -ComputerName 192.168.1.10 -Port 636
+New-ADGroup -Name "ADUM-Admins" -GroupScope Global -GroupCategory Security `
+  -Path "OU=Grupid,DC=haigla,DC=vmh,DC=ee"
+New-ADGroup -Name "ADUM-HR" -GroupScope Global -GroupCategory Security `
+  -Path "OU=Grupid,DC=haigla,DC=vmh,DC=ee"
+
+Add-ADGroupMember -Identity "ADUM-Admins" -Members "mari.tamm"
+Add-ADGroupMember -Identity "ADUM-HR"     -Members "jaan.kask"
 ```
 
 ---
@@ -172,117 +158,85 @@ Test-NetConnection -ComputerName 192.168.1.10 -Port 636
 ```
 ad-usermanager/
 ├── server.js               # Express server, turvamiddleware, marsruutimine
+├── ecosystem.config.js     # PM2 tootmiskonf
 ├── config/
-│   └── ldap.js             # LDAP klient, helper-funktsioonid, mock-andmed
-├── middleware/
-│   └── auth.js             # requireAuth, requireAdmin middleware
+│   ├── ldap.js             # LDAP klient, helperfunktsioonid, mock-andmed
+│   └── settings.json       # Veebirakendusest muudetavad seaded
 ├── lib/
-│   └── audit.js            # Auditilogi (500 kirjet, ringpuhver)
+│   ├── db.js               # MySQL ühenduspool
+│   ├── migrate.js          # Andmebaasi migratsioon (automaatne käivitusel)
+│   ├── audit.js            # Auditilogi
+│   ├── requests.js         # Taotluste salvestus
+│   └── adServiceSync.js    # Teenuste AD atribuutide sünk
+├── middleware/
+│   └── auth.js             # requireAuth, requireAdmin, requireHROrAdmin
 ├── routes/
-│   ├── auth.js             # /api/auth/* — sisselogimine, väljalogimine
-│   ├── users.js            # /api/users/* — kasutajate CRUD
-│   ├── groups.js           # /api/groups — gruppide nimekiri
-│   └── settings.js         # /api/settings/* — LDAP/email/SMS seaded
+│   ├── auth.js             # /api/auth/*
+│   ├── users.js            # /api/users/*
+│   ├── groups.js           # /api/groups
+│   ├── services.js         # /api/services/*
+│   ├── requests.js         # /api/requests/*
+│   └── settings.js         # /api/settings/*
 └── public/
-    ├── index.html          # SPA kest
-    ├── css/app.css         # Disainisüsteem (CSS muutujad, komponendid)
+    ├── index.html
+    ├── css/app.css
     └── js/
         ├── api.js          # Fetch-wrapper, CSRF tokenid
-        ├── app.js          # Peamine rakendus: router, login, sidebar, toasts
+        ├── app.js          # Router, login, sidebar, toasts
         └── views/
             ├── dashboard.js
             ├── users.js
             ├── userDetail.js
+            ├── services.js
+            ├── requests.js
             ├── groups.js
             ├── auditLog.js
             └── settings.js
 ```
 
-### Backend API
+### API lühiülevaade
 
 | Meetod | URL | Kirjeldus |
 |---|---|---|
 | POST | `/api/auth/login` | Sisselogimine |
 | POST | `/api/auth/logout` | Väljalogimine |
-| GET | `/api/auth/me` | Praegune sessioon |
 | GET | `/api/users` | Kasutajate nimekiri (`?q=&dept=&status=`) |
-| GET | `/api/users/:sam` | Üks kasutaja |
-| POST | `/api/users` | Loo kasutaja |
+| POST | `/api/users` | Loo kasutaja (admin) |
 | PUT | `/api/users/:sam` | Muuda kasutajat |
 | DELETE | `/api/users/:sam` | Kustuta kasutaja |
 | POST | `/api/users/:sam/reset-password` | Lähtesta parool |
 | POST | `/api/users/:sam/enable` | Luba konto |
 | POST | `/api/users/:sam/disable` | Keela konto |
 | POST | `/api/users/:sam/unlock` | Ava lukk |
-| POST | `/api/users/:sam/groups/add` | Lisa gruppi |
-| POST | `/api/users/:sam/groups/remove` | Eemalda grupist |
-| GET | `/api/groups` | Gruppide nimekiri |
+| GET | `/api/services` | Teenuste nimekiri |
+| GET | `/api/services/user/:sam` | Kasutaja teenused ja rollid |
+| POST | `/api/services` | Loo teenus |
+| PUT | `/api/services/:id` | Muuda teenust |
+| DELETE | `/api/services/:id` | Kustuta teenus |
+| GET | `/api/requests` | Taotluste nimekiri |
+| POST | `/api/requests` | Esita taotlus |
+| POST | `/api/requests/:id/approve` | Kinnita (admin) |
+| POST | `/api/requests/:id/reject` | Lükka tagasi (admin) |
 | GET | `/api/audit` | Auditilogi |
-| GET | `/api/settings` | Rakenduse seaded |
+| GET | `/api/settings` | Seaded |
 | PUT | `/api/settings` | Uuenda seadeid |
-| POST | `/api/settings/test-ldap` | Testi LDAP ühendust |
-| GET | `/api/config` | Avalik konfig (domeenid) |
-
----
-
-## Turvalisus
-
-| Mehhanism | Rakendus |
-|---|---|
-| **CSRF** | Iga muutev päring nõuab `X-CSRF-Token` päist |
-| **Rate limiting** | Login: max 10 katset / 15 minutit |
-| **Session** | httpOnly, sameSite: strict, 8h TTL, `session.regenerate()` login |
-| **Helmet** | CSP, HSTS, X-Frame-Options, Referrer-Policy |
-| **LDAP injection** | Kõik filtrid läbivad `escapeLdap()` |
-| **LDAPS** | Paroolid edastatakse ainult TLS-krüpteeritud ühenduse kaudu |
-| **Kohalik admin** | AD mahavõtmisel tagavarasüsteem — kasuta tugevat parooli |
-| **Auditilogi** | Kõik toimingud, sisselogimised ja ebaõnnestumised logitakse |
 
 ---
 
 ## Veaotsing
 
-### Ei saa sisse logida — vale kasutajanimi/parool
-- Kontrolli kas `LDAP_ADMIN_GROUP` grupp on AD-s olemas ja kasutaja on seal
-- Lülita sisse `LDAP_DEBUG=true` — vaata nodemon konsooli
+**Ei saa sisse logida** — lülita `LDAP_DEBUG=true`, vaata konsooli.
 
-### Strong Auth Required
-- AD nõuab LDAPS-i: muuda `LDAP_URL=ldaps://...` ja port `636`
+**Strong Auth Required** — AD nõuab LDAPS-i: `LDAP_URL=ldaps://...` port 636.
 
-### Insufficient Access Rights
-- Teenuskontol puuduvad õigused — käivita [AD seadistuse](#ad-seadistus) PowerShell käsud
+**Insufficient Access Rights** — teenuskontol puuduvad õigused, käivita AD seadistuse skriptid.
 
-### Unwilling To Perform (kasutaja loomine)
-- AD nõuab 3-sammulist loomist: disabled → set password → enable
-- Kood teeb seda automaatselt, aga parool peab olema vähemalt 8 tähemärki ja vastama domeeni paroolipoliitikale
+**Unwilling To Perform** — parool ei vasta domeeni paroolipoliitikale (min 8 märki, keerukus).
 
-### Kasutajaid ei kuvata
-- Kontrolli `LDAP_USERS_OU` — peab vastama täpselt AD OU teekonnale
-- Lülita sisse `LDAP_DEBUG=true` — konsoolis kuvatakse kirjete arv
-
-### Port 3000/3001 on kasutusel
-```bash
-# Windows
-netstat -ano | findstr :3001
-taskkill /PID <pid> /F
-```
-
----
-
-## Mock-režiim
-
-Arenduseks ja testimiseks ilma päris AD-ta:
-
-```env
-MOCK_AD=true
-MOCK_ADMIN_USER=admin
-MOCK_ADMIN_PASS=admin123
-```
-
-Mock sisaldab 30 Eesti haiglatöötajat koos realistlike andmetega (Mart Tamm, Kadri Mägi jt), osakondadega (Kardioloogia, Kiirabi, IT-osakond jt) ja gruppidega.
+**Sessiooni tabel puudub** — rakendus loob `sessions` tabeli MariaDB-s automaatselt käivitusel.
 
 ---
 
 ## Litsents
 
-Sisemine tarkvara — Viljandi Haigla IT-osakond.
+Vaata [LICENSE](LICENSE).

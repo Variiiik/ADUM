@@ -5,8 +5,8 @@
 
 :root {
   --accent: #b02a37;
-  --accent-weak: color-mix(in srgb, var(--accent) 12%, transparent);
-  --accent-weak-2: color-mix(in srgb, var(--accent) 20%, transparent);
+  --accent-weak:   #f7e6e8;
+  --accent-weak-2: #f0d0d4;
   --accent-ink: #ffffff;
 
   --navy: #5e1d27;
@@ -16,6 +16,13 @@
   --ok: #16a34a; --ok-bg: #dcfce7; --ok-ink: #15803d;
   --bad: #dc2626; --bad-bg: #fee2e2; --bad-ink: #b91c1c;
   --warn: #d97706; --warn-bg: #fef3c7; --warn-ink: #b45309;
+
+  /* Role / tag colours used in JS inline styles */
+  --role-o-bg: #ede9fe;  --role-o-ink: #6d28d9;
+  --role-t-bg: #fff3e0;  --role-t-ink: #c2410c;
+  --role-l-bg: #dcfce7;  --role-l-ink: #15803d;
+  --tag-local-bg: #f3e8ff; --tag-local-ink: #7e22ce;
+  --tag-ad-bg:    #e3f2fd; --tag-ad-ink:    #1565c0;
 
   --r-sm: 6px; --r: 10px; --r-lg: 14px;
   --shadow-sm: 0 1px 2px rgba(15,23,42,.06), 0 1px 3px rgba(15,23,42,.04);
@@ -32,10 +39,21 @@
 
 [data-theme="dark"] {
   --navy: #2c1117; --navy-2: #200b10; --navy-3: #4a202a;
-  --accent-ink: #1a0608;
-  --ok-bg: color-mix(in srgb,#16a34a 22%,#0f0609); --ok-ink: #4ade80;
-  --bad-bg: color-mix(in srgb,#dc2626 22%,#0f0609); --bad-ink: #f87171;
-  --warn-bg: color-mix(in srgb,#d97706 24%,#0f0609); --warn-ink: #fbbf24;
+  --accent: #d6374a;
+  --accent-ink: #fff;
+  --accent-weak:   rgba(214,55,74,.25);
+  --accent-weak-2: rgba(214,55,74,.40);
+
+  --ok:   #4ade80; --ok-bg:   #0a2314; --ok-ink:   #4ade80;
+  --bad:  #f87171; --bad-bg:  #2d0a0a; --bad-ink:  #f87171;
+  --warn: #fbbf24; --warn-bg: #2d1c05; --warn-ink: #fbbf24;
+
+  --role-o-bg: #2e1f4a;  --role-o-ink: #c4b5fd;
+  --role-t-bg: #2d1a06;  --role-t-ink: #fb923c;
+  --role-l-bg: #0a2314;  --role-l-ink: #4ade80;
+  --tag-local-bg: #2a1040; --tag-local-ink: #d8b4fe;
+  --tag-ad-bg:    #0a1f2e; --tag-ad-ink:    #93c5fd;
+
   --bg: #15090c; --surface: #241318; --surface-2: #2e191f; --surface-3: #381f26;
   --border: #45282f; --border-strong: #5a3640;
   --ink: #f4e7e9; --ink-2: #cdaab0; --ink-3: #93717a;
@@ -241,6 +259,10 @@ a{ color:inherit; }
 .badge.neutral{ background:var(--surface-3); color:var(--ink-2); }
 
 .avatar{ border-radius:50%; display:grid; place-items:center; font-weight:600; color:#fff; flex-shrink:0; letter-spacing:.01em; }
+.avatar-wrap{ position:relative; flex-shrink:0; }
+.avatar-wrap.editable{ cursor:pointer; }
+.avatar-overlay{ position:absolute; inset:0; border-radius:50%; background:rgba(0,0,0,.5); display:grid; place-items:center; color:#fff; opacity:0; transition:opacity .15s; pointer-events:none; }
+.avatar-wrap.editable:hover .avatar-overlay{ opacity:1; }
 
 /* Forms */
 .field{ display:flex; flex-direction:column; gap:6px; }

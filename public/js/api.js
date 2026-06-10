@@ -63,6 +63,10 @@ const API = (() => {
     unlockUser:    (sam)         => post('/api/users/' + encodeURIComponent(sam) + '/unlock', {}),
     addToGroup:    (sam, g)      => post('/api/users/' + encodeURIComponent(sam) + '/groups/add',    { groupName: g }),
     removeFromGroup:(sam, g)     => post('/api/users/' + encodeURIComponent(sam) + '/groups/remove', { groupName: g }),
+    getUserAttrs:  (sam)         => get('/api/users/' + encodeURIComponent(sam) + '/attrs'),
+    setUserAttr:   (sam, attr, value) => request('/api/users/' + encodeURIComponent(sam) + '/attrs', { method:'PATCH', body: JSON.stringify({ attr, value }) }),
+    uploadUserPhoto: (sam, dataUrl) => request('/api/users/' + encodeURIComponent(sam) + '/photo', { method:'POST', body: JSON.stringify({ dataUrl }) }),
+    deleteUserPhoto: (sam)          => del('/api/users/' + encodeURIComponent(sam) + '/photo'),
 
     // Groups
     getGroups: () => get('/api/groups'),
