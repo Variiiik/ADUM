@@ -44,6 +44,7 @@ const ICONS = {
   download:  '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
   building:  '<rect x="4" y="2" width="16" height="20" rx="2"/><path d="M9 22v-4h6v4"/><path d="M8 6h.01M16 6h.01M8 10h.01M16 10h.01M8 14h.01M16 14h.01"/>',
   briefcase: '<rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>',
+  clipboard: '<path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>',
   sliders:   '<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>',
 };
 
@@ -74,6 +75,16 @@ function checkbox(on) {
   return `<button class="checkbox${on?' on':''}" role="checkbox" aria-checked="${on}">${icon('check',12)}</button>`;
 }
 
+// ─── Accent ink (white vs dark text on accent bg) ─────────────────────────────
+function _accentInk(hex) {
+  try {
+    const r = parseInt(hex.slice(1,3),16)/255;
+    const g = parseInt(hex.slice(3,5),16)/255;
+    const b = parseInt(hex.slice(5,7),16)/255;
+    return (0.299*r + 0.587*g + 0.114*b) > 0.5 ? '#1a0a0a' : '#ffffff';
+  } catch { return '#ffffff'; }
+}
+
 // ─── App state ────────────────────────────────────────────────────────────────
 const App = {
   state: {
@@ -82,16 +93,46 @@ const App = {
     params: {},
     collapsed: localStorage.getItem('sb-collapsed') === '1',
     theme: localStorage.getItem('theme') || 'light',
+    appearance: {},
+    pendingRequests: 0,
+  },
+
+  applyAppearance(a) {
+    if (!a) return;
+    const r = document.documentElement;
+    if (a.accentColor) {
+      r.style.setProperty('--accent',     a.accentColor);
+      r.style.setProperty('--accent-ink', _accentInk(a.accentColor));
+    }
+    if (a.navyColor)  r.style.setProperty('--navy',   a.navyColor);
+    if (a.navyColor2) r.style.setProperty('--navy-2', a.navyColor2);
+    if (a.navyColor3) r.style.setProperty('--navy-3', a.navyColor3);
+    if (a.systemName) document.title = a.systemName;
   },
 
   async init() {
     document.documentElement.setAttribute('data-theme', this.state.theme);
     if (this.state.collapsed) document.getElementById('app').classList.add('collapsed');
 
+    // Apply cached branding immediately (login page shows correct colors even before auth)
+    try {
+      const cached = JSON.parse(localStorage.getItem('appearance') || '{}');
+      this.state.appearance = cached;
+      this.applyAppearance(cached);
+    } catch { /* ignore bad cache */ }
+
     try {
       const { user, csrfToken } = await API.me();
       API.setToken(csrfToken);
       this.state.user = user;
+      // Refresh appearance from server after auth (same session, no CSRF complications)
+      try {
+        const { settings } = await API.getSettings();
+        const a = settings.appearance || {};
+        this.state.appearance = a;
+        this.applyAppearance(a);
+        localStorage.setItem('appearance', JSON.stringify(a));
+      } catch { /* use cached */ }
       this.showApp();
     } catch {
       this.showLogin();
@@ -112,6 +153,13 @@ const App = {
     this.renderSidebar();
     this.renderTopbar();
     this.navigate(this.state.view, this.state.params);
+    // Load pending request count for admin badge (best-effort, non-blocking)
+    if (this.state.user?.isAdmin) {
+      API.getRequestsCount().then(({ pending }) => {
+        this.state.pendingRequests = pending || 0;
+        this.renderSidebar();
+      }).catch(() => {});
+    }
   },
 
   async navigate(view, params) {
@@ -129,6 +177,7 @@ const App = {
       groups:    () => Views.Groups.render(content),
       audit:     () => Views.AuditLog.render(content),
       settings:  () => Views.Settings.render(content),
+      requests:  () => Views.Requests.render(content),
     };
     const fn = dispatch[view] || dispatch.dashboard;
     try { await fn(); } catch (err) {
@@ -146,14 +195,20 @@ const App = {
 
   // ─── Login ─────────────────────────────────────────────────────
   renderLogin() {
+    const a       = this.state.appearance || {};
+    const sysName = a.systemName || 'AD Kasutajahaldus';
+    const orgName = a.orgName    || 'Viljandi Haigla';
+    const logoHtml = a.logoEnabled
+      ? `<img src="/api/settings/logo?v=${a.logoVersion||0}" alt="${esc(sysName)}" class="login-logo-img" />`
+      : `<div class="login-logo">${icon('shield',22)}</div>`;
     const pg = document.getElementById('login-page');
     pg.className = 'login-page';
     pg.innerHTML = `
       <div class="login-card">
-        <div class="login-logo">${icon('shield',22)}</div>
+        ${logoHtml}
         <div class="login-title">
-          <h1>AD Kasutajahaldus</h1>
-          <p>Viljandi Haigla · Active Directory</p>
+          <h1>${esc(sysName)}</h1>
+          <p>${esc(orgName)} · Active Directory</p>
         </div>
         <div id="login-error" style="display:none" class="login-error">
           ${icon('alert',16)}<span id="login-error-text"></span>
@@ -203,27 +258,53 @@ const App = {
 
   // ─── Sidebar ───────────────────────────────────────────────────
   renderSidebar() {
-    const NAV = [
+    const a       = this.state.appearance || {};
+    const sysName = a.systemName || 'AD Kasutajahaldus';
+    const orgName = a.orgName    || 'Viljandi Haigla';
+    const isAdmin = !!(this.state.user?.isAdmin);
+    const isHR    = !!(this.state.user?.isHR);
+    const pending = this.state.pendingRequests || 0;
+    const logoHtml = a.logoEnabled
+      ? `<img src="/api/settings/logo?v=${a.logoVersion||0}" alt="" class="sb-logo-img" />`
+      : `<div class="sb-logo">${icon('shield',19)}</div>`;
+
+    const pendingBadge = pending > 0
+      ? `<span style="background:var(--bad);color:#fff;border-radius:99px;padding:1px 6px;font-size:10px;font-weight:700;line-height:1.4;margin-left:auto">${pending}</span>`
+      : '';
+
+    const roleLabel = isHR ? '<span style="font-size:10px;color:#8595b3;text-transform:uppercase;letter-spacing:.5px">HR</span>' : '';
+
+    // Build nav based on role
+    const NAV_ADMIN = [
       { sec: 'Üldine' },
       { id:'dashboard', label:'Töölaud',    ic:'dashboard' },
       { id:'users',     label:'Kasutajad',  ic:'users'     },
+      { id:'requests',  label:'Taotlused',  ic:'clipboard', badge: pendingBadge },
       { sec: 'Haldus' },
       { id:'groups',    label:'Grupid',     ic:'group'     },
       { sec: 'Süsteem' },
       { id:'settings',  label:'Seaded',     ic:'settings'  },
       { id:'audit',     label:'Auditilogi', ic:'audit'     },
     ];
+    const NAV_HR = [
+      { sec: 'Üldine' },
+      { id:'dashboard', label:'Töölaud',    ic:'dashboard' },
+      { id:'users',     label:'Kasutajad',  ic:'users'     },
+      { id:'requests',  label:'Minu taotlused', ic:'clipboard' },
+    ];
+    const NAV = isHR ? NAV_HR : NAV_ADMIN;
+
     const sb = document.getElementById('sidebar');
     sb.innerHTML = `
       <div class="sb-brand">
-        <div class="sb-logo">${icon('shield',19)}</div>
-        <div class="sb-brand-text"><b>AD Kasutajahaldus</b><span>Viljandi Haigla</span></div>
+        ${logoHtml}
+        <div class="sb-brand-text"><b>${esc(sysName)}</b><span>${esc(orgName)}</span></div>
       </div>
       <nav class="sb-nav">
         ${NAV.map(n => n.sec
           ? `<div class="sb-section">${esc(n.sec)}</div>`
-          : `<button class="sb-item${this.state.view===n.id||(n.id==='users'&&this.state.view==='userDetail')?' active':''}" data-view="${n.id}" title="${esc(n.label)}">
-               ${icon(n.ic,18)}<span class="sb-label">${esc(n.label)}</span>
+          : `<button class="sb-item${this.state.view===n.id||(n.id==='users'&&this.state.view==='userDetail')?' active':''}" data-view="${n.id}" title="${esc(n.label)}" style="display:flex;align-items:center;gap:8px;width:100%">
+               ${icon(n.ic,18)}<span class="sb-label" style="flex:1">${esc(n.label)}</span>${n.badge||''}
              </button>`
         ).join('')}
       </nav>
@@ -233,7 +314,7 @@ const App = {
             ${esc(initials(this.state.user?.displayName || 'KA'))}
           </div>
           <div class="sb-label" style="min-width:0;overflow:hidden">
-            <div style="color:#fff;font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(this.state.user?.displayName||'')}</div>
+            <div style="color:#fff;font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(this.state.user?.displayName||'')} ${roleLabel}</div>
             <div style="font-size:11px;color:#8595b3;white-space:nowrap">${esc(this.state.user?.sam||'')}</div>
           </div>
         </div>
@@ -266,6 +347,7 @@ const App = {
       groups:     { t:'Grupid',        c:'Turbe- ja jaotusrühmad' },
       audit:      { t:'Auditilogi',    c:'Süsteemi sündmused' },
       settings:   { t:'Seaded',        c:'Süsteemi konfiguratsioon' },
+      requests:   { t:'Taotlused',     c:'Konto loomise taotlused' },
     };
     const meta = TITLES[this.state.view] || TITLES.dashboard;
     const tb = document.getElementById('topbar');

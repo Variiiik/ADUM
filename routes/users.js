@@ -1,9 +1,13 @@
 'use strict';
 
-const express = require('express');
-const router  = express.Router();
-const lc      = require('../config/ldap');
-const audit   = require('../lib/audit');
+const express    = require('express');
+const fs         = require('fs');
+const path       = require('path');
+const router     = express.Router();
+const lc         = require('../config/ldap');
+const audit      = require('../lib/audit');
+const { requireAdmin } = require('../middleware/auth');
+const { createUser } = require('../lib/createUser');
 
 // Map a raw LDAP object to a clean user record
 // Safely read an attribute — tries original key, then lowercase
@@ -46,6 +50,7 @@ function mapUser(e) {
     ou:                dn ? dn.split(',').slice(1).join(',') : '',
     dn,
     status:            lc.computeStatus(uac, lockT),
+    lockoutTime:       lockT || null,
     lastLogon:         str(e, 'lastLogon') || null,
     pwdLastSet:        str(e, 'pwdLastSet') || null,
     pwNeverExpires:    !!(uac & 0x10000),
@@ -114,10 +119,11 @@ router.get('/:sam', async (req, res) => {
   }
 });
 
-// POST /api/users — create
-router.post('/', async (req, res) => {
+// POST /api/users — create (admin only; HR users must use /api/requests)
+router.post('/', requireAdmin, async (req, res) => {
   const actor = req.session.user.sam;
-  const { givenName, sn, username, mail, password, department, title, manager, ou, enabled } = req.body;
+  const { givenName, sn, username, mail, password, department, title, manager, ou, enabled,
+          telephoneNumber, sendSms } = req.body;
 
   if (!givenName?.trim() || !sn?.trim() || !username?.trim() || !password) {
     return res.status(400).json({ error: 'Kohustuslikud väljad puuduvad.' });
@@ -126,90 +132,28 @@ router.post('/', async (req, res) => {
   if (password.length < 8)    return res.status(400).json({ error: 'Parool peab olema vähemalt 8 tähemärki.' });
 
   try {
-    if (lc.MOCK_AD) {
-      if (lc.MOCK_USERS.find(u => u.sam === username)) {
-        return res.status(409).json({ error: 'Kasutajanimi on juba kasutusel.' });
-      }
-      const colors = ['#2563eb','#7c3aed','#db2777','#ea580c','#0891b2','#16a34a'];
-      const nu = {
-        sam: username,
-        displayName: `${givenName.trim()} ${sn.trim()}`,
-        givenName: givenName.trim(), sn: sn.trim(),
-        userPrincipalName: `${username}@domeen.ee`,
-        mail: mail || `${username}@domeen.ee`,
-        department: department || '', title: title || '',
-        manager: manager || null,
-        telephoneNumber: '', employeeID: 'EMP' + (4100 + lc.MOCK_USERS.length),
-        ou: ou || lc.USERS_OU, dn: `CN=${givenName.trim()} ${sn.trim()},${ou || lc.USERS_OU}`,
-        userAccountControl: enabled === false ? 514 : 512,
-        lockoutTime: 0, lastLogon: null,
-        pwdLastSet: new Date().toISOString(), pwNeverExpires: false, mustChangePw: true,
-        groups: ['Haigla-Kõik'],
-        avatarColor: colors[lc.MOCK_USERS.length % colors.length],
-        created: new Date().toLocaleDateString('et-EE'),
-        status: enabled === false ? 'disabled' : 'active',
-      };
-      lc.MOCK_USERS.unshift(nu);
-      audit.logEvent(actor, 'CREATE_USER', username, 'success', department);
-      return res.status(201).json({ user: nu });
-    }
+    const result = await createUser(req.body);
+    const nu     = result.user || {};
 
-    // Real LDAP create — AD requires a strict 3-step process:
-    // 1. Create account as DISABLED (514) — no password yet
-    // 2. Set unicodePwd (requires LDAPS)
-    // 3. Enable account if requested (512)
-    const ldapjs = require('ldapjs');
-    const client = lc.createClient();
-    await bind(client);
-
-    const display  = `${givenName.trim()} ${sn.trim()}`;
-    const targetOU = ou || lc.USERS_OU;
-    const userDN   = `CN=${display},${targetOU}`;
-    const domain   = lc.BASE_DN.replace(/DC=/gi, '').replace(/,/g, '.');
-
-    // Step 1 — create disabled account
-    const entry = {
-      objectClass:        ['top', 'person', 'organizationalPerson', 'user'],
-      sAMAccountName:     username,
-      userPrincipalName:  `${username}@${domain}`,
-      cn:                 display,
-      givenName:          givenName.trim(),
-      sn:                 sn.trim(),
-      displayName:        display,
-      userAccountControl: '514',   // always start disabled
-    };
-    if (mail)       entry.mail       = mail;
-    if (department) entry.department = department;
-    if (title)      entry.title      = title;
-    if (manager)    entry.manager    = manager;
-
-    await new Promise((ok, fail) =>
-      client.add(userDN, entry, e => e ? fail(Object.assign(e, { step: 'add' })) : ok())
-    );
-
-    // Step 2 — set password (unicodePwd requires LDAPS / TLS)
-    const pwBuf = Buffer.from(`"${password}"`, 'utf16le');
-    await ldapModify(client, userDN, [
-      new ldapjs.Change({
-        operation:    'replace',
-        modification: { type: 'unicodePwd', values: [pwBuf] },
-      }),
-    ]);
-
-    // Step 3 — enable account if requested
-    if (enabled !== false) {
-      await ldapModify(client, userDN, ldapChanges([
-        { op: 'replace', type: 'userAccountControl', val: '512' },
-      ]));
-    }
-
-    client.unbind();
     audit.logEvent(actor, 'CREATE_USER', username, 'success', department);
-    res.status(201).json({ ok: true, sam: username });
+
+    let smsResult = null;
+    if (sendSms && telephoneNumber) {
+      if (lc.MOCK_AD) {
+        smsResult = { ok: true, simulated: true };
+        audit.logEvent(actor, 'SMS_SENT', username, 'success', `Simuleeritud → ${telephoneNumber}`);
+      } else {
+        const display = `${givenName.trim()} ${sn.trim()}`;
+        smsResult = await trySendSms(username, password, telephoneNumber, display);
+        audit.logEvent(actor, 'SMS_SENT', username, smsResult.ok ? 'success' : 'warning',
+          smsResult.reason || telephoneNumber);
+      }
+    }
+    res.status(201).json({ user: nu, sms: smsResult });
   } catch (err) {
     audit.logEvent(actor, 'CREATE_USER', username || '?', 'failure', err.message);
     console.error('[users] create:', err.message);
-    res.status(500).json({ error: 'Kasutaja loomine ebaõnnestus.' });
+    res.status(err.status || 500).json({ error: err.message || 'Kasutaja loomine ebaõnnestus.' });
   }
 });
 
@@ -550,6 +494,48 @@ async function setUAC(sam, disable) {
     { op: 'replace', type: 'userAccountControl', val: String(uac) }
   ]));
   client.unbind();
+}
+
+// ─── SMS helper ──────────────────────────────────────────────────────────────
+
+async function trySendSms(username, password, phone, displayName) {
+  const settingsFile = path.join(__dirname, '..', 'config', 'settings.json');
+  let settings = {};
+  try {
+    if (fs.existsSync(settingsFile)) settings = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
+  } catch { /* kasuta vaikimisi */ }
+
+  const sms = settings.sms || {};
+  if (!sms.enabled) return { ok: false, reason: 'SMS pole seadistatud' };
+
+  const smsTpl = settings.templates?.sms?.newAccount;
+  if (smsTpl && smsTpl.enabled === false) return { ok: false, reason: 'SMS mall on keelatud' };
+
+  const tplBody = smsTpl?.body ||
+    'Teie uus AD konto:\nKasutajanimi: {{username}}\nAjutine parool: {{password}}\nPalun vahetage parool esimesel sisselogimisel.';
+
+  const msg = tplBody
+    .replace(/\{\{username\}\}/g,    username)
+    .replace(/\{\{password\}\}/g,    password)
+    .replace(/\{\{displayName\}\}/g, displayName || username)
+    .replace(/\{\{department\}\}/g,  '');
+
+  const provider = sms.provider || 'twilio';
+
+  if (provider === 'twilio') {
+    try {
+      // eslint-disable-next-line import/no-extraneous-dependencies
+      const twilio = require('twilio');
+      const client = twilio(sms.apiKey, sms.apiSecret);
+      await client.messages.create({ body: msg, from: sms.from, to: phone });
+      return { ok: true };
+    } catch (e) {
+      const notInstalled = e.code === 'MODULE_NOT_FOUND' || e.message?.includes('Cannot find module');
+      return { ok: false, reason: notInstalled ? 'Twilio pole installitud (npm install twilio)' : e.message };
+    }
+  }
+
+  return { ok: false, reason: `SMS pakkuja '${provider}' pole toetatud` };
 }
 
 module.exports = router;

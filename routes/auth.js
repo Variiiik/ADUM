@@ -2,9 +2,22 @@
 
 const express  = require('express');
 const crypto   = require('crypto');
+const fs       = require('fs');
+const path     = require('path');
 const router   = express.Router();
 const lc       = require('../config/ldap');
 const audit    = require('../lib/audit');
+
+function getRolesConfig() {
+  try {
+    const file = path.join(__dirname, '..', 'config', 'settings.json');
+    if (fs.existsSync(file)) {
+      const s = JSON.parse(fs.readFileSync(file, 'utf8'));
+      return s.roles || {};
+    }
+  } catch { /* fall through */ }
+  return {};
+}
 
 const DEBUG = process.env.LDAP_DEBUG === 'true';
 
@@ -56,8 +69,15 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Vale kasutajanimi või parool.' });
     }
 
+    // Determine role from group membership
+    const roles   = getRolesConfig();
+    const hrGroup = roles.hrGroup || process.env.LDAP_HR_GROUP || 'AD-HR';
+    const userIsHR = isUser && mockUser.groups && mockUser.groups.includes(hrGroup);
+
     const user = isAdmin
       ? { sam: 'k.admin', displayName: 'Klaus Admin', isAdmin: true }
+      : userIsHR
+      ? { sam: mockUser.sam, displayName: mockUser.displayName, isHR: true }
       : { sam: mockUser.sam, displayName: mockUser.displayName, isAdmin: true };
 
     req.session.regenerate((err) => {
@@ -101,33 +121,42 @@ router.post('/login', async (req, res) => {
       ['displayName', 'department', 'memberOf']
     ).then(results => {
       const info       = results[0] || {};
-      const adminGroup = process.env.LDAP_ADMIN_GROUP;
+      const roles      = getRolesConfig();
+      const adminGroup = roles.adminGroup || process.env.LDAP_ADMIN_GROUP || '';
+      const hrGroup    = roles.hrGroup    || process.env.LDAP_HR_GROUP    || '';
 
       const memberOf = info.memberOf
         ? (Array.isArray(info.memberOf) ? info.memberOf : [info.memberOf])
         : [];
 
       dbg(`memberOf (${memberOf.length}):`, memberOf);
-      dbg(`Required group: "${adminGroup}"`);
+      dbg(`Admin group: "${adminGroup}", HR group: "${hrGroup}"`);
 
-      if (adminGroup) {
-        const inGroup = memberOf.some(dn =>
-          dn.toLowerCase().includes(`cn=${adminGroup.toLowerCase()},`)
-        );
-        if (!inGroup) {
-          console.warn(`[AUTH] "${safeName}" not in group "${adminGroup}". memberOf: ${memberOf.join(' | ')}`);
-          audit.logEvent(safeName, 'LOGIN', safeName, 'failure',
-            `Pole grupis "${adminGroup}"`);
-          return res.status(403).json({
-            error: `Ligipääs keelatud. Peate olema grupis "${adminGroup}".`,
-          });
-        }
+      const inAdminGroup = adminGroup
+        ? memberOf.some(dn => dn.toLowerCase().includes(`cn=${adminGroup.toLowerCase()},`))
+        : false;
+      const inHrGroup = hrGroup
+        ? memberOf.some(dn => dn.toLowerCase().includes(`cn=${hrGroup.toLowerCase()},`))
+        : false;
+
+      // If neither group configured → allow as admin (legacy/open behavior)
+      if (!adminGroup && !hrGroup) {
+        // pass through — user gets isAdmin below
+      } else if (!inAdminGroup && !inHrGroup) {
+        const groupNames = [adminGroup, hrGroup].filter(Boolean).join('" või "');
+        console.warn(`[AUTH] "${safeName}" not in any required group. memberOf: ${memberOf.join(' | ')}`);
+        audit.logEvent(safeName, 'LOGIN', safeName, 'failure',
+          `Pole grupis "${groupNames}"`);
+        return res.status(403).json({
+          error: `Ligipääs keelatud. Peate olema grupis "${groupNames}".`,
+        });
       }
 
       const user = {
-        sam: safeName,
+        sam:         safeName,
         displayName: info.displayName || safeName,
-        isAdmin: true,
+        isAdmin:     inAdminGroup || (!adminGroup && !hrGroup),
+        isHR:        inHrGroup && !inAdminGroup,
       };
       req.session.regenerate((sErr) => {
         if (sErr) return res.status(500).json({ error: 'Sessiooni viga.' });

@@ -157,18 +157,30 @@ const DEPT_TITLES = {
 };
 
 const OUS = [
-  'OU=Kasutajad,OU=Tallinn,DC=haigla,DC=vmh,DC=ee',
-  'OU=Arstid,OU=Kliinikud,DC=haigla,DC=vmh,DC=ee',
-  'OU=Õed,OU=Kliinikud,DC=haigla,DC=vmh,DC=ee',
-  'OU=Tugipersonal,OU=Tallinn,DC=haigla,DC=vmh,DC=ee',
+  // Kliinikud — osakonnakesksed OU-d
+  'OU=Kardioloogia,OU=Kliinikud,DC=haigla,DC=vmh,DC=ee',
+  'OU=Kiirabi,OU=Kliinikud,DC=haigla,DC=vmh,DC=ee',
+  'OU=Radioloogia,OU=Kliinikud,DC=haigla,DC=vmh,DC=ee',
+  'OU=Kirurgia,OU=Kliinikud,DC=haigla,DC=vmh,DC=ee',
+  'OU=Pediaatria,OU=Kliinikud,DC=haigla,DC=vmh,DC=ee',
+  'OU=Neuroloogia,OU=Kliinikud,DC=haigla,DC=vmh,DC=ee',
+  'OU=Sünnitusosakond,OU=Kliinikud,DC=haigla,DC=vmh,DC=ee',
+  'OU=Anestesioloogia,OU=Kliinikud,DC=haigla,DC=vmh,DC=ee',
+  'OU=Onkoloogia,OU=Kliinikud,DC=haigla,DC=vmh,DC=ee',
+  // Tallinn — tugiteenused
+  'OU=IT-osakond,OU=Tugipersonal,OU=Tallinn,DC=haigla,DC=vmh,DC=ee',
+  'OU=Personaliosakond,OU=Tugipersonal,OU=Tallinn,DC=haigla,DC=vmh,DC=ee',
+  'OU=Apteek,OU=Tallinn,DC=haigla,DC=vmh,DC=ee',
+  'OU=Laboratoorium,OU=Tallinn,DC=haigla,DC=vmh,DC=ee',
   'OU=Administratsioon,OU=Tallinn,DC=haigla,DC=vmh,DC=ee',
+  // Juur
   'OU=Teenusekontod,DC=haigla,DC=vmh,DC=ee',
 ];
 
 const ALL_GROUPS = [
   'Haigla-Kõik','VPN-Kasutajad','eTervis-Ligipääs','Pilt-PACS',
   'Apteek-Ravimid','Labor-LIS','IT-Administraatorid','Arstid-Kardio',
-  'Valvegraafik','Printerid-Tallinn','Personaliportaal','Õppejõud',
+  'Valvegraafik','Printerid-Tallinn','Personaliportaal','Õppejõud','AD-HR',
 ];
 
 const AVATAR_COLORS = [
@@ -217,11 +229,22 @@ const MOCK_USERS = (() => {
       ? new Date().toISOString()
       : new Date(Date.now() - daysAgo * 86400000).toISOString();
 
-    const ou = (title.match(/arst|loog$|Kirurg|Günekoloog/)) ? OUS[1]
-      : (title.match(/õde|Õde|Ämmaemand/)) ? OUS[2]
-      : dept === 'IT-osakond' ? OUS[3]
-      : dept === 'Personaliosakond' ? OUS[4]
-      : OUS[0];
+    const DEPT_TO_OU = {
+      'Kardioloogia':    'OU=Kardioloogia,OU=Kliinikud,DC=haigla,DC=vmh,DC=ee',
+      'Kiirabi':         'OU=Kiirabi,OU=Kliinikud,DC=haigla,DC=vmh,DC=ee',
+      'Radioloogia':     'OU=Radioloogia,OU=Kliinikud,DC=haigla,DC=vmh,DC=ee',
+      'IT-osakond':      'OU=IT-osakond,OU=Tugipersonal,OU=Tallinn,DC=haigla,DC=vmh,DC=ee',
+      'Kirurgia':        'OU=Kirurgia,OU=Kliinikud,DC=haigla,DC=vmh,DC=ee',
+      'Pediaatria':      'OU=Pediaatria,OU=Kliinikud,DC=haigla,DC=vmh,DC=ee',
+      'Neuroloogia':     'OU=Neuroloogia,OU=Kliinikud,DC=haigla,DC=vmh,DC=ee',
+      'Sünnitusosakond': 'OU=Sünnitusosakond,OU=Kliinikud,DC=haigla,DC=vmh,DC=ee',
+      'Apteek':          'OU=Apteek,OU=Tallinn,DC=haigla,DC=vmh,DC=ee',
+      'Laboratoorium':   'OU=Laboratoorium,OU=Tallinn,DC=haigla,DC=vmh,DC=ee',
+      'Personaliosakond':'OU=Personaliosakond,OU=Tugipersonal,OU=Tallinn,DC=haigla,DC=vmh,DC=ee',
+      'Anestesioloogia': 'OU=Anestesioloogia,OU=Kliinikud,DC=haigla,DC=vmh,DC=ee',
+      'Onkoloogia':      'OU=Onkoloogia,OU=Kliinikud,DC=haigla,DC=vmh,DC=ee',
+    };
+    const ou = DEPT_TO_OU[dept] || 'OU=Administratsioon,OU=Tallinn,DC=haigla,DC=vmh,DC=ee';
 
     const groups = ['Haigla-Kõik'];
     for (let g = 0; g < 1 + Math.floor(rnd() * 3); g++) {
@@ -268,6 +291,33 @@ const MOCK_USERS = (() => {
   return users;
 })();
 
+// Fixed test HR user — logs in with password 'Password1!' in mock mode
+MOCK_USERS.push({
+  sam: 'p.personalijuht',
+  displayName: 'Piret Truu',
+  givenName: 'Piret',
+  sn: 'Truu',
+  userPrincipalName: 'p.personalijuht@haigla.vmh.ee',
+  mail: 'p.personalijuht@haigla.ee',
+  department: 'Personaliosakond',
+  title: 'Personalijuht',
+  manager: null,
+  telephoneNumber: '+372 51234567',
+  employeeID: 'EMP9001',
+  ou: 'OU=Personaliosakond,OU=Tugipersonal,OU=Tallinn,DC=haigla,DC=vmh,DC=ee',
+  dn: 'CN=Piret Truu,OU=Personaliosakond,OU=Tugipersonal,OU=Tallinn,DC=haigla,DC=vmh,DC=ee',
+  userAccountControl: 512,
+  lockoutTime: 0,
+  lastLogon: new Date().toISOString(),
+  pwdLastSet: new Date().toISOString(),
+  pwNeverExpires: false,
+  mustChangePw: false,
+  groups: ['Haigla-Kõik', 'AD-HR'],
+  avatarColor: '#0891b2',
+  created: '01.01.2023',
+  status: 'active',
+});
+
 const MOCK_GROUPS = [
   { name:'Haigla-Kõik',      desc:'Kõik töötajad',              type:'Turberühm'  },
   { name:'VPN-Kasutajad',    desc:'Kaugligipääs (VPN)',          type:'Turberühm'  },
@@ -281,6 +331,7 @@ const MOCK_GROUPS = [
   { name:'Printerid-Tallinn',desc:'Tallinna printerid',          type:'Turberühm'  },
   { name:'Personaliportaal', desc:'HR iseteenindus',             type:'Turberühm'  },
   { name:'Õppejõud',         desc:'Residentide juhendajad',      type:'Jaotusrühm' },
+  { name:'AD-HR',            desc:'Personaliosakond — kontotaotlused', type:'Turberühm' },
 ];
 
 function computeStatus(uac, lockoutTime) {
@@ -292,6 +343,6 @@ function computeStatus(uac, lockoutTime) {
 
 module.exports = {
   LDAP_URL, BASE_DN, BIND_USER, BIND_PASS, USERS_OU, GROUPS_OU, MOCK_AD,
-  createClient, searchUsers, searchGroups, escapeLdap, computeStatus,
+  createClient, search, searchUsers, searchGroups, escapeLdap, computeStatus,
   MOCK_USERS, MOCK_GROUPS, DEPARTMENTS, OUS, ALL_GROUPS,
 };

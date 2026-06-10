@@ -21,6 +21,9 @@ const API = (() => {
     } catch (e) {
       throw new Error('Võrguühendus ebaõnnestus. Kontrollige internetiühendust.');
     }
+    // Keep CSRF token in sync with whatever the server's session currently holds
+    const freshToken = resp.headers.get('X-CSRF-Token');
+    if (freshToken) csrfToken = freshToken;
     if (resp.status === 401) {
       // If already logged in, session expired — go back to login without reload loop
       if (window.App && window.App.state && window.App.state.user) {
@@ -70,10 +73,25 @@ const API = (() => {
     // Public config (no auth needed)
     getConfig: () => get('/api/config'),
 
+    // OU struktuur
+    getOus: () => get('/api/ous'),
+
     // Settings
     getSettings:    ()           => get('/api/settings'),
     updateSettings: (sec, data)  => put('/api/settings', { section: sec, data }),
     testLdap:       (data)       => post('/api/settings/test-ldap', data),
     testEmail:      ()           => post('/api/settings/test-email', {}),
+
+    // Logo upload — sends dataURL as JSON so standard CSRF + body-parser path is used
+    uploadLogo: (dataUrl) => post('/api/settings/logo', { dataUrl }),
+    deleteLogo: () => del('/api/settings/logo'),
+
+    // Requests (HR approval workflow)
+    getRequests:      ()           => get('/api/requests'),
+    getRequestsCount: ()           => get('/api/requests/count'),
+    submitRequest:    (data)       => post('/api/requests', data),
+    approveRequest:   (id, data)   => post('/api/requests/' + id + '/approve', data),
+    rejectRequest:    (id, reason) => post('/api/requests/' + id + '/reject', { reason }),
+    deleteRequest:    (id)         => del('/api/requests/' + id),
   };
 })();

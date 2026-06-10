@@ -7,11 +7,13 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
 const crypto = require('crypto');
+const fs = require('fs');
 
-const authRouter = require('./routes/auth');
-const usersRouter = require('./routes/users');
-const groupsRouter = require('./routes/groups');
+const authRouter     = require('./routes/auth');
+const usersRouter    = require('./routes/users');
+const groupsRouter   = require('./routes/groups');
 const settingsRouter = require('./routes/settings');
+const requestsRouter = require('./routes/requests');
 const { requireAuth } = require('./middleware/auth');
 const audit = require('./lib/audit');
 
@@ -25,24 +27,26 @@ if (!process.env.SESSION_SECRET || process.env.SESSION_SECRET.length < 32) {
   console.warn('[SECURITY] SESSION_SECRET is missing or too short. Use a random 64-char string in production.');
 }
 
-// Security headers
+// Security headers — CSP is disabled in development to avoid blocking HTTP access
 app.use(helmet({
-  contentSecurityPolicy: {
+  contentSecurityPolicy: isProd ? {
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
-      fontSrc: ["'self'", 'https://fonts.gstatic.com'],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      fontSrc: ["'self'"],
       imgSrc: ["'self'", 'data:'],
       connectSrc: ["'self'"],
       frameSrc: ["'none'"],
       objectSrc: ["'none'"],
       baseUri: ["'self'"],
       formAction: ["'self'"],
+      upgradeInsecureRequests: null,
     },
-  },
+  } : false,
   crossOriginEmbedderPolicy: false,
   referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+  strictTransportSecurity: false,
 }));
 
 // Rate limiting
@@ -89,14 +93,20 @@ app.use((req, res, next) => {
   }
   const unsafe = !['GET', 'HEAD', 'OPTIONS'].includes(req.method);
   if (unsafe && req.path.startsWith('/api/') && req.path !== '/api/auth/login') {
-    const clientToken = req.headers['x-csrf-token'];
-    if (!clientToken || !crypto.timingSafeEqual(
-      Buffer.from(clientToken),
-      Buffer.from(req.session.csrfToken)
-    )) {
+    const clientToken = req.headers['x-csrf-token'] || '';
+    let valid = false;
+    try {
+      const a = Buffer.from(clientToken);
+      const b = Buffer.from(req.session.csrfToken);
+      valid = a.length === b.length && crypto.timingSafeEqual(a, b);
+    } catch { valid = false; }
+    if (!valid) {
       return res.status(403).json({ error: 'CSRF token on vale. Laadige leht uuesti.' });
     }
   }
+  // Always echo the current session CSRF token so the client stays in sync
+  // (critical after server restarts that wipe the in-memory session store)
+  res.setHeader('X-CSRF-Token', req.session.csrfToken);
   next();
 });
 
@@ -112,6 +122,51 @@ app.get('/api/config', (req, res) => {
   res.json({ domains });
 });
 
+// OU tree builder — recursive, creates intermediate nodes on-the-fly
+function buildOuTree(ouDNs, baseDN) {
+  const root = { dn: baseDN, name: baseDN.replace(/DC=/gi,'').replace(/,/g,'.'), children: [] };
+  const map  = { [baseDN.toLowerCase()]: root };
+
+  function ensureNode(dn) {
+    const key = dn.toLowerCase();
+    if (map[key]) return map[key];
+    const parts  = dn.split(',');
+    const name   = (parts[0].split('=')[1] || parts[0]).trim();
+    const parent = ensureNode(parts.slice(1).join(','));
+    const node   = { dn, name, children: [] };
+    parent.children.push(node);
+    map[key] = node;
+    return node;
+  }
+
+  for (const dn of ouDNs) {
+    if (dn.toLowerCase() !== baseDN.toLowerCase()) ensureNode(dn);
+  }
+  return root;
+}
+
+// GET /api/ous — AD OU hierarhia (mock: staatilised andmed; real: LDAP search)
+app.get('/api/ous', requireAuth, async (req, res) => {
+  const lc = require('./config/ldap');
+  try {
+    if (lc.MOCK_AD) {
+      return res.json({ tree: buildOuTree(lc.OUS, lc.BASE_DN) });
+    }
+    const results = await lc.search(
+      lc.BASE_DN,
+      '(objectClass=organizationalUnit)',
+      ['distinguishedName']
+    );
+    const dns = results
+      .map(r => r.distinguishedName || r.distinguishedname)
+      .filter(Boolean);
+    res.json({ tree: buildOuTree(dns, lc.BASE_DN) });
+  } catch (err) {
+    console.error('[ous]', err.message);
+    res.status(500).json({ error: 'OU struktuuri laadimine ebaõnnestus.' });
+  }
+});
+
 // Static files (no directory listing)
 app.use(express.static(path.join(__dirname, 'public'), {
   index: false,
@@ -123,11 +178,35 @@ app.use(express.static(path.join(__dirname, 'public'), {
 app.use('/api/auth/login', loginLimiter);
 app.use('/api/', apiLimiter);
 
+// Public branding endpoints — no auth, needed for login page theming
+const SETTINGS_FILE_PATH = path.join(__dirname, 'config', 'settings.json');
+const LOGO_FILE_PATH     = path.join(__dirname, 'config', 'logo.dat');
+
+app.get('/api/settings/appearance', (req, res) => {
+  try {
+    const s = JSON.parse(fs.readFileSync(SETTINGS_FILE_PATH, 'utf8'));
+    res.json({ appearance: s.appearance || {} });
+  } catch {
+    res.json({ appearance: {} });
+  }
+});
+
+app.get('/api/settings/logo', (req, res) => {
+  try {
+    const s = JSON.parse(fs.readFileSync(SETTINGS_FILE_PATH, 'utf8'));
+    if (!s.appearance?.logoEnabled || !fs.existsSync(LOGO_FILE_PATH)) return res.status(404).end();
+    res.setHeader('Content-Type', s.appearance.logoMime || 'image/png');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.send(fs.readFileSync(LOGO_FILE_PATH));
+  } catch { res.status(404).end(); }
+});
+
 // Routes
-app.use('/api/auth', authRouter);
-app.use('/api/users', requireAuth, usersRouter);
-app.use('/api/groups', requireAuth, groupsRouter);
+app.use('/api/auth',     authRouter);
+app.use('/api/users',    requireAuth, usersRouter);
+app.use('/api/groups',   requireAuth, groupsRouter);
 app.use('/api/settings', requireAuth, settingsRouter);
+app.use('/api/requests', requireAuth, requestsRouter);
 
 // Audit log endpoint
 app.get('/api/audit', requireAuth, (req, res) => {

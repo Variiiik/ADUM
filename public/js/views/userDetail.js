@@ -23,9 +23,10 @@ Views.UserDetail = {
   },
 
   _renderDetail(container) {
-    const u    = this._user;
-    const tab  = this._tab;
-    const self = this;
+    const u       = this._user;
+    const tab     = this._tab;
+    const self    = this;
+    const isAdmin = !!(App.state.user?.isAdmin);
     const auditEntries = window._auditCache || [];
 
     function fmtDT(iso) {
@@ -61,7 +62,7 @@ Views.UserDetail = {
       tabContent = `
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
           <span class="muted" style="font-size:13px">${u.groups.length} grupikuuluvust</span>
-          <button class="btn sm primary" id="ud-add-group">${icon('plus',14)} Lisa gruppi</button>
+          ${isAdmin ? `<button class="btn sm primary" id="ud-add-group">${icon('plus',14)} Lisa gruppi</button>` : ''}
         </div>
         <div id="ud-group-picker" style="display:none" class="card" style="background:var(--surface-2);padding:6px;margin-bottom:12px">
           ${available.length === 0
@@ -80,7 +81,7 @@ Views.UserDetail = {
               <div class="nm">${esc(g.name)}</div>
               <div class="ds">${esc(g.desc)} · ${esc(g.type)}</div>
             </div>
-            ${gname!=='Haigla-Kõik' ? `<button class="icon-act danger" title="Eemalda grupist" data-rm-group="${esc(gname)}">${icon('x',16)}</button>` : ''}
+            ${isAdmin && gname!=='Haigla-Kõik' ? `<button class="icon-act danger" title="Eemalda grupist" data-rm-group="${esc(gname)}">${icon('x',16)}</button>` : ''}
           </div>`;
         }).join('')}`;
     } else if (tab === 'account') {
@@ -110,7 +111,7 @@ Views.UserDetail = {
             ${u.employeeID ? `<span class="chip">${icon('id',14)} ${esc(u.employeeID)}</span>` : ''}
           </div>
         </div>
-        <button class="btn" id="ud-edit">${icon('edit',16)} Muuda</button>
+        ${isAdmin ? `<button class="btn" id="ud-edit">${icon('edit',16)} Muuda</button>` : ''}
       </div>
 
       <div class="detail-grid">
@@ -124,7 +125,7 @@ Views.UserDetail = {
         </div>
 
         <div style="display:flex;flex-direction:column;gap:16px">
-          <div class="card card-pad">
+          ${isAdmin ? `<div class="card card-pad">
             <h3 class="sec-title">Konto toimingud</h3>
             <div class="action-list">
               <button class="btn" id="ud-reset">${icon('key',16)} Lähtesta parool</button>
@@ -135,7 +136,7 @@ Views.UserDetail = {
               </button>
               <button class="btn danger" id="ud-delete">${icon('trash',16)} Kustuta kasutaja</button>
             </div>
-          </div>
+          </div>` : ''}
 
           <div class="card card-pad">
             <h3 class="sec-title">Kokkuvõte</h3>
@@ -156,8 +157,10 @@ Views.UserDetail = {
       });
     });
 
-    // Edit
-    document.getElementById('ud-edit')?.addEventListener('click', () => Views.Users.openForm(u, null));
+    // Edit (admin only)
+    if (isAdmin) {
+      document.getElementById('ud-edit')?.addEventListener('click', () => Views.Users.openForm(u, null));
+    }
 
     // Reset password
     document.getElementById('ud-reset')?.addEventListener('click', () => {

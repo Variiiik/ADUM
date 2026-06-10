@@ -1,0 +1,26 @@
+[
+  {
+    "id": "req-1781079671155-6e5f8942",
+    "status": "approved",
+    "submittedBy": "p.personalijuht",
+    "submittedByName": "Piret Truu",
+    "submittedAt": "2026-06-10T08:21:11.155Z",
+    "reviewedBy": "k.admin",
+    "reviewedAt": "2026-06-10T08:21:55.365Z",
+    "rejectionReason": "",
+    "data": {
+      "username": "test.kasutaja",
+      "givenName": "test",
+      "sn": "kasutaja",
+      "mail": "test.kasutaja@varik.local",
+      "password": "K9$Gjr4NBL$ze@",
+      "department": "Apteek",
+      "title": "Farmatseut",
+      "manager": "",
+      "ou": "OU=Apteek,OU=Tallinn,DC=haigla,DC=vmh,DC=ee",
+      "enabled": true,
+      "telephoneNumber": "23543245",
+      "sendSms": false
+    }
+  }
+]

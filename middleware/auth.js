@@ -17,4 +17,14 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-module.exports = { requireAuth, requireAdmin };
+function requireHROrAdmin(req, res, next) {
+  if (!req.session || !req.session.user) {
+    return res.status(401).json({ error: 'Autentimine nõutav.' });
+  }
+  if (!req.session.user.isAdmin && !req.session.user.isHR) {
+    return res.status(403).json({ error: 'Juurdepääs keelatud.' });
+  }
+  next();
+}
+
+module.exports = { requireAuth, requireAdmin, requireHROrAdmin };

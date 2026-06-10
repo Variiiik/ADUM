@@ -3,6 +3,7 @@
 
 Views.Settings = {
   _tab: 'ldap',
+  _tmplChan: 'email',
   _tmplTab: 'welcome',
   _settings: null,
   _auditEntries: [],
@@ -29,6 +30,9 @@ Views.Settings = {
     const self = this;
 
     const tabs = [
+      { id:'appearance',label:'Kujundus',        ic:'sun'       },
+      { id:'ui',        label:'Kasutajaliides',  ic:'id'        },
+      { id:'roles',     label:'Rollid',          ic:'users'     },
       { id:'ldap',      label:'LDAP liidestus',  ic:'sliders'   },
       { id:'email',     label:'E-posti seaded',  ic:'mail'      },
       { id:'sms',       label:'SMS liidestus',   ic:'phone'     },
@@ -36,8 +40,210 @@ Views.Settings = {
       { id:'log',       label:'Süsteemi logi',   ic:'audit'     },
     ];
 
+    const COLOR_PRESETS = [
+      { id:'burgundy', label:'Burgundia', accent:'#b02a37', navy:'#5e1d27', navy2:'#4a141d', navy3:'#74303c' },
+      { id:'blue',     label:'Sinine',    accent:'#2563eb', navy:'#1e3a8a', navy2:'#1e3799', navy3:'#1d4ed8' },
+      { id:'teal',     label:'Roheline',  accent:'#0d9488', navy:'#134e4a', navy2:'#0f3d3a', navy3:'#1a5c58' },
+      { id:'violet',   label:'Lilla',     accent:'#7c3aed', navy:'#3b1a6b', navy2:'#2e1357', navy3:'#552a9e' },
+      { id:'emerald',  label:'Smaragd',   accent:'#16a34a', navy:'#064e3b', navy2:'#053d2f', navy3:'#0a6b52' },
+      { id:'slate',    label:'Hallsinine',accent:'#475569', navy:'#1e293b', navy2:'#0f172a', navy3:'#334155' },
+    ];
+
     let body = '';
-    if (tab === 'ldap') {
+    if (tab === 'appearance') {
+      const ap = s.appearance || {};
+      const curAccent = ap.accentColor || '#b02a37';
+      const matchedPreset = COLOR_PRESETS.find(p => p.accent === curAccent);
+      body = `
+        <form id="st-ap-form">
+          <div class="form-sec-title">Süsteemi info</div>
+          <div class="form-grid" style="margin-bottom:20px">
+            <div class="field">
+              <label>Süsteemi nimi</label>
+              <input class="input" id="ap-sysname" value="${esc(ap.systemName||'AD Kasutajahaldus')}" placeholder="AD Kasutajahaldus" />
+              <span class="hint">Näidatakse sisselogimislehel ja külgmenüüs</span>
+            </div>
+            <div class="field">
+              <label>Asutus / organisatsioon</label>
+              <input class="input" id="ap-orgname" value="${esc(ap.orgName||'Viljandi Haigla')}" placeholder="Viljandi Haigla" />
+              <span class="hint">Alampealkiri logo all</span>
+            </div>
+          </div>
+
+          <div class="form-sec-title">Logo</div>
+          <div style="display:flex;align-items:flex-start;gap:16px;margin-bottom:12px;flex-wrap:wrap">
+            <div id="ap-logo-preview-wrap" style="${ap.logoEnabled ? '' : 'display:none'}">
+              <img id="ap-logo-preview" src="/api/settings/logo?v=${ap.logoVersion||0}" alt="Logo"
+                style="width:72px;height:72px;object-fit:contain;border-radius:12px;border:1px solid var(--border);background:var(--surface-2);padding:4px" />
+            </div>
+            <div id="ap-logo-placeholder" style="${ap.logoEnabled ? 'display:none' : 'display:flex'};width:72px;height:72px;border-radius:12px;border:2px dashed var(--border);background:var(--surface-2);align-items:center;justify-content:center;color:var(--ink-3)">
+              ${icon('upload',24)}
+            </div>
+            <div style="display:flex;flex-direction:column;gap:8px;justify-content:center">
+              <label class="btn sm" style="cursor:pointer">
+                ${icon('upload',14)} Laadi logo
+                <input type="file" id="ap-logo-input" accept="image/png,image/jpeg,image/svg+xml,image/webp" style="display:none" />
+              </label>
+              <button type="button" class="btn sm" id="ap-logo-remove" style="${ap.logoEnabled ? '' : 'display:none'}">
+                ${icon('trash',14)} Eemalda logo
+              </button>
+              <span class="hint">PNG, SVG, WebP</span>
+            </div>
+          </div>
+          <!-- Inline resize panel -->
+          <div id="ap-resize-panel" style="display:none;background:var(--surface-2);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:16px">
+            <div style="font-weight:600;font-size:13px;margin-bottom:12px">${icon('sliders',14)} Kohanda logo suurust</div>
+            <div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap">
+              <div style="flex-shrink:0">
+                <canvas id="ap-resize-canvas" style="border-radius:10px;border:1px solid var(--border);display:block;max-width:180px;max-height:180px;background:var(--surface-3)"></canvas>
+              </div>
+              <div style="flex:1;min-width:180px;display:flex;flex-direction:column;gap:10px">
+                <div style="font-size:12px;color:var(--ink-3)">Orig: <span id="ap-resize-orig" style="font-family:monospace"></span></div>
+                <div style="font-size:12px;color:var(--ink-3)">Väljund: <span id="ap-resize-out" style="font-family:monospace;font-weight:600;color:var(--ink)"></span></div>
+                <div>
+                  <label style="font-size:13px;font-weight:500;display:block;margin-bottom:6px">Maksimaalne laius (px)</label>
+                  <div style="display:flex;align-items:center;gap:10px">
+                    <input type="range" id="ap-resize-slider" min="32" max="512" value="256" style="flex:1" />
+                    <span id="ap-resize-slider-val" style="font-size:13px;font-family:monospace;min-width:36px;text-align:right">256</span>
+                  </div>
+                </div>
+                <div style="display:flex;gap:8px;margin-top:4px">
+                  <button type="button" class="btn primary sm" id="ap-resize-confirm">${icon('upload',14)} Laadi üles</button>
+                  <button type="button" class="btn sm"          id="ap-resize-cancel">${icon('x',14)} Tühista</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-sec-title" style="margin-top:20px">Värvitema</div>
+          <div style="margin-bottom:20px">
+            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;align-items:center">
+              ${COLOR_PRESETS.map(p => {
+                const isActive = p.accent === curAccent;
+                return `<button type="button" class="color-swatch${isActive?' selected':''}"
+                  style="background:${p.accent}" title="${esc(p.label)}"
+                  data-accent="${p.accent}" data-navy="${p.navy}" data-navy2="${p.navy2}" data-navy3="${p.navy3}">
+                  ${isActive ? `<span style="width:10px;height:10px;border-radius:50%;background:#fff;display:block;margin:auto;opacity:.9"></span>` : ''}
+                </button>`;
+              }).join('')}
+              <span style="font-size:12px;color:var(--ink-3);margin-left:4px">${COLOR_PRESETS.find(p=>p.accent===curAccent)?.label||'Kohandatud'}</span>
+            </div>
+            <div>
+              <div style="font-size:13px;font-weight:500;color:var(--ink-2);margin-bottom:8px">Kohandatud rõhuvärv</div>
+              <div style="display:flex;align-items:center;gap:10px">
+                <input type="color" id="ap-custom-color" value="${esc(curAccent)}" style="width:40px;height:36px;border-radius:8px;border:1px solid var(--border);cursor:pointer;padding:2px;background:var(--surface);flex-shrink:0" />
+                <input class="input mono" id="ap-custom-hex" value="${esc(curAccent)}" style="width:100px" placeholder="#b02a37" maxlength="7" />
+              </div>
+              <span class="hint" style="margin-top:5px;display:block">Ainult rõhuvärv (nupud, märgendid, aktiivne menüü). Külgmenüü toon tuleneb eelvalikust.</span>
+            </div>
+          </div>
+
+          <div class="form-sec-title" style="margin-top:20px">Eelvaade</div>
+          <div id="ap-preview" style="border-radius:12px;overflow:hidden;border:1px solid var(--border);margin-bottom:24px;max-width:320px">
+            <div id="ap-prev-sb" style="background:${esc(ap.navyColor||'#5e1d27')};padding:16px;display:flex;align-items:center;gap:10px">
+              <div id="ap-prev-logo" style="width:34px;height:34px;border-radius:9px;background:${esc(curAccent)};display:grid;place-items:center;flex-shrink:0;color:#fff">
+                ${ap.logoEnabled
+                  ? `<img src="/api/settings/logo?v=${ap.logoVersion||0}" style="width:34px;height:34px;object-fit:contain;border-radius:9px" />`
+                  : icon('shield',16)}
+              </div>
+              <div>
+                <div id="ap-prev-name" style="color:#fff;font-size:13.5px;font-weight:600">${esc(ap.systemName||'AD Kasutajahaldus')}</div>
+                <div id="ap-prev-org"  style="color:#8595b3;font-size:11.5px">${esc(ap.orgName||'Viljandi Haigla')}</div>
+              </div>
+            </div>
+            <div style="background:var(--surface-2);padding:10px 14px;display:flex;gap:8px;align-items:center">
+              <div id="ap-prev-btn" style="background:${esc(curAccent)};color:#fff;border-radius:7px;padding:6px 14px;font-size:12px;font-weight:600">Nupp</div>
+              <div id="ap-prev-badge" style="background:${esc(curAccent)}22;color:${esc(curAccent)};border-radius:99px;padding:3px 10px;font-size:12px">Märgend</div>
+            </div>
+          </div>
+
+          <input type="hidden" id="ap-accent"  value="${esc(curAccent)}" />
+          <input type="hidden" id="ap-navy"    value="${esc(ap.navyColor||'#5e1d27')}" />
+          <input type="hidden" id="ap-navy2"   value="${esc(ap.navyColor2||'#4a141d')}" />
+          <input type="hidden" id="ap-navy3"   value="${esc(ap.navyColor3||'#74303c')}" />
+
+          <div style="display:flex;justify-content:flex-end;margin-top:4px">
+            <button type="submit" class="btn primary">${icon('check',16)} Salvesta kujundus</button>
+          </div>
+        </form>`;
+    } else if (tab === 'ui') {
+      const u = s.ui || {};
+      const PREFIX_OPTS = [
+        { val:'1',    ex:'m.tamm',    label:'1 täht' },
+        { val:'2',    ex:'ma.tamm',   label:'2 tähte' },
+        { val:'full', ex:'mari.tamm', label:'Täis eesnimi' },
+      ];
+      body = `
+        <form id="st-ui-form">
+          <div class="form-grid">
+            <div class="form-sec-title">Kasutajanime vorming</div>
+            <div class="field full">
+              <label>Eesnime prefix uue kasutaja loomisel</label>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:2px" id="su-prefix-wrap">
+                ${PREFIX_OPTS.map(o=>`
+                  <button type="button" class="btn${(u.usernamePrefix||'1')===o.val?' primary':''} sm" data-prefix="${o.val}">
+                    <span style="font-family:monospace">${esc(o.ex)}</span>
+                    <span style="opacity:.65;font-size:11px">${esc(o.label)}</span>
+                  </button>`).join('')}
+              </div>
+              <span class="hint">Kasutajanimi genereeritakse automaatselt — administraator valib vormingu siin.</span>
+              <input type="hidden" id="su-prefix" value="${esc(u.usernamePrefix||'1')}" />
+            </div>
+
+            <div class="form-sec-title">Väljad</div>
+            <div class="field full">
+              <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border:1px solid var(--border);border-radius:9px;background:var(--surface-2)">
+                <div>
+                  <div style="font-weight:600;font-size:13.5px">Näita "Juht" välja</div>
+                  <div class="hint">Kuva otsese juhi valik kasutaja loomisel ja muutmisel</div>
+                </div>
+                <label class="switch" style="margin-left:auto">
+                  <input type="checkbox" id="su-manager" ${u.showManager!==false?'checked':''} />
+                  <span class="track"></span>
+                </label>
+              </div>
+            </div>
+          </div>
+          <div style="display:flex;justify-content:flex-end;margin-top:20px">
+            <button type="submit" class="btn primary">${icon('check',16)} Salvesta kasutajaliidese seaded</button>
+          </div>
+        </form>`;
+    } else if (tab === 'roles') {
+      const r = s.roles || {};
+      body = `
+        <form id="st-roles-form">
+          <div style="display:flex;align-items:flex-start;gap:9px;padding:12px 16px;background:var(--accent-weak);color:var(--accent);border-radius:9px;margin-bottom:20px;font-size:13px">
+            ${icon('info',15)} <span>Siia seadistate, millised AD grupid annavad kasutajale millise rolli. Muudatused rakenduvad järgmisest sisselogimisest.</span>
+          </div>
+          <div class="form-grid">
+            <div class="form-sec-title">HR roll — kontotaotluste esitamine</div>
+            <div class="field full">
+              <label>HR grupi nimi (AD)</label>
+              <input class="input mono" id="sr-hrgroup" value="${esc(r.hrGroup||'AD-HR')}" placeholder="AD-HR" />
+              <span class="hint">Selles AD grupis olevad kasutajad saavad logida sisse ja esitada kontotaotlusi. Administraatorid kinnitavad need.</span>
+            </div>
+
+            <div class="form-sec-title" style="margin-top:8px">Admin roll — täisõigused</div>
+            <div class="field full">
+              <label>Admin grupi nimi (AD)</label>
+              <input class="input mono" id="sr-admingroup" value="${esc(r.adminGroup||'')}" placeholder="IT-Administraatorid" />
+              <span class="hint">Täiendav AD grupp täisõigustega administraatoritele. Tühi = kõik autentitud kasutajad on administraatorid (kasutage ainult siis, kui <code>LDAP_ADMIN_GROUP</code> pole seadistatud).</span>
+            </div>
+
+            <div class="form-sec-title" style="margin-top:8px">Mock režiim — testimine</div>
+            <div class="field full">
+              <div style="padding:12px 16px;border:1px solid var(--border);border-radius:9px;background:var(--surface-2);font-size:13px">
+                <div style="font-weight:600;margin-bottom:8px">Test HR kasutaja (mock)</div>
+                <div class="hint" style="margin-bottom:6px">Kasutajanimi: <code>p.personalijuht</code> &nbsp;·&nbsp; Parool: <code>Password1!</code></div>
+                <div class="hint">See kasutaja on grupis <code>AD-HR</code> ja saab esitada kontotaotlusi.</div>
+              </div>
+            </div>
+          </div>
+          <div style="display:flex;justify-content:flex-end;margin-top:20px">
+            <button type="submit" class="btn primary">${icon('check',16)} Salvesta rollid</button>
+          </div>
+        </form>`;
+    } else if (tab === 'ldap') {
       const l = s.ldap || {};
       body = `
         <form id="st-ldap-form">
@@ -210,40 +416,87 @@ Views.Settings = {
         </form>`;
     } else if (tab === 'templates') {
       const tmpl = s.templates || {};
+      const chan = this._tmplChan;
       const tt   = this._tmplTab;
-      const TMPL_TABS = [
-        { id:'welcome',        label:'Tervitusmeil'    },
-        { id:'passwordReset',  label:'Parooli lähtestamine' },
-        { id:'accountDisabled',label:'Konto keelamine' },
-        { id:'accountEnabled', label:'Konto lubamine'  },
+
+      const EMAIL_TABS = [
+        { id:'welcome',         label:'Uus konto'            },
+        { id:'passwordReset',   label:'Parooli lähtestamine' },
+        { id:'accountDisabled', label:'Konto keelamine'      },
+        { id:'accountEnabled',  label:'Konto lubamine'       },
       ];
-      const VARS = {
-        welcome:         ['{{displayName}}','{{username}}','{{password}}','{{department}}'],
-        passwordReset:   ['{{displayName}}','{{username}}','{{password}}'],
+      const SMS_TABS = [
+        { id:'newAccount',    label:'Uus konto'            },
+        { id:'passwordReset', label:'Parooli lähtestamine' },
+      ];
+      const EMAIL_VARS = {
+        welcome:         ['{{displayName}}','{{username}}','{{department}}'],
+        passwordReset:   ['{{displayName}}','{{username}}'],
         accountDisabled: ['{{displayName}}','{{username}}'],
         accountEnabled:  ['{{displayName}}','{{username}}'],
       };
-      const cur = tmpl[tt] || { subject:'', body:'' };
+      const SMS_VARS = {
+        newAccount:    ['{{displayName}}','{{username}}','{{password}}','{{department}}'],
+        passwordReset: ['{{displayName}}','{{username}}','{{password}}'],
+      };
+
+      const isEmail  = chan === 'email';
+      const curTabs  = isEmail ? EMAIL_TABS : SMS_TABS;
+      const curVars  = isEmail ? EMAIL_VARS : SMS_VARS;
+      const chanData = tmpl[chan] || {};
+      const validIds = curTabs.map(t => t.id);
+      const activeTT = validIds.includes(tt) ? tt : validIds[0];
+      const cur = chanData[activeTT] || (isEmail ? { enabled:true, subject:'', body:'' } : { enabled:true, body:'' });
+
       body = `
-        <div class="template-tabs">
-          ${TMPL_TABS.map(t=>`<button class="tmpl-tab${t.id===tt?' active':''}" data-tmpl="${t.id}">${esc(t.label)}</button>`).join('')}
+        <div style="display:flex;gap:8px;margin-bottom:16px;padding-bottom:14px;border-bottom:1px solid var(--border)">
+          <button class="btn${isEmail?' primary':''} sm" data-tmpl-chan="email">${icon('mail',14)} E-post</button>
+          <button class="btn${!isEmail?' primary':''} sm" data-tmpl-chan="sms">${icon('phone',14)} SMS</button>
+        </div>
+        ${isEmail ? `<div style="display:flex;align-items:center;gap:9px;padding:10px 14px;background:var(--bad-bg);color:var(--bad-ink);border-radius:9px;margin-bottom:14px;font-size:13px">
+          ${icon('alert',15)} <span><strong>Turvapiirang:</strong> E-kirja teel ei tohi parooli saata. Parool edastatakse ainult SMS-iga.</span>
+        </div>` : `<div style="display:flex;align-items:center;gap:9px;padding:10px 14px;background:var(--ok-bg);color:var(--ok-ink);border-radius:9px;margin-bottom:14px;font-size:13px">
+          ${icon('phone',15)} <span>SMS mallides on lubatud <strong>{{password}}</strong> muutuja.</span>
+        </div>`}
+        <div class="template-tabs" style="margin-bottom:14px">
+          ${curTabs.map(t => {
+            const isActive = t.id === activeTT;
+            const tEnabled = (chanData[t.id] || {}).enabled !== false;
+            return `<button class="tmpl-tab${isActive?' active':''}" data-tmpl="${esc(t.id)}">
+              ${esc(t.label)}<span style="display:inline-block;width:7px;height:7px;border-radius:50%;margin-left:6px;vertical-align:middle;background:${tEnabled?'var(--ok-ink)':'var(--ink-3)'}"></span>
+            </button>`;
+          }).join('')}
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border:1px solid var(--border);border-radius:9px;background:var(--surface-2);margin-bottom:14px">
+          <div style="flex:1">
+            <div style="font-weight:600;font-size:13.5px">Mall aktiivne</div>
+            <div class="hint">${isEmail ? 'Kui keelatud, siis e-kirja ei saadeta' : 'Kui keelatud, siis SMS-i ei saadeta'}</div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="st-enabled" ${cur.enabled!==false?'checked':''} />
+            <span class="track"></span>
+          </label>
         </div>
         <form id="st-tmpl-form">
+          <input type="hidden" id="st-chan" value="${esc(chan)}" />
+          <input type="hidden" id="st-key"  value="${esc(activeTT)}" />
           <div style="margin-bottom:12px">
             <div class="hint" style="margin-bottom:8px">Saadaolevad muutujad:</div>
             <div class="vars-hint">
-              ${(VARS[tt]||[]).map(v=>`<span class="var-chip">${esc(v)}</span>`).join('')}
+              ${(curVars[activeTT]||[]).map(v=>`<span class="var-chip">${esc(v)}</span>`).join('')}
             </div>
           </div>
           <div class="settings-section">
-            <div class="field" style="margin-bottom:14px">
+            ${isEmail ? `<div class="field" style="margin-bottom:14px">
               <label>Teema (Subject)</label>
               <input class="input" id="st-subject" value="${esc(cur.subject||'')}" placeholder="Kirja teema" />
-            </div>
+            </div>` : ''}
             <div class="field">
-              <label>Kirja sisu (Body)</label>
-              <textarea class="textarea" id="st-body" rows="12" placeholder="Kirja sisu…">${esc(cur.body||'')}</textarea>
-              <span class="hint">Kasutage muutujaid nagu {{displayName}} dünaamilise sisu jaoks.</span>
+              <label>${isEmail ? 'Kirja sisu' : 'SMS sisu'}</label>
+              <textarea class="textarea" id="st-body" rows="${isEmail?12:6}" placeholder="${isEmail?'Kirja sisu…':'SMS sisu…'}">${esc(cur.body||'')}</textarea>
+              <span class="hint">${isEmail
+                ? 'Muutujad: {{displayName}}, {{username}}, {{department}}. Parooli muutujat ei tohi kasutada!'
+                : 'Muutujad: {{displayName}}, {{username}}, {{password}}, {{department}}'}</span>
             </div>
           </div>
           <div style="display:flex;justify-content:flex-end;margin-top:16px">
@@ -353,9 +606,265 @@ Views.Settings = {
       btn.addEventListener('click', () => { self._tab = btn.dataset.stab; self._renderSettings(container); });
     });
 
+    // Template channel tabs (E-post / SMS)
+    container.querySelectorAll('[data-tmpl-chan]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        self._tmplChan = btn.dataset.tmplChan;
+        self._tmplTab  = self._tmplChan === 'sms' ? 'newAccount' : 'welcome';
+        self._renderSettings(container);
+      });
+    });
+
     // Template sub-tabs
     container.querySelectorAll('[data-tmpl]').forEach(btn => {
       btn.addEventListener('click', () => { self._tmplTab = btn.dataset.tmpl; self._renderSettings(container); });
+    });
+
+    // ── Appearance form ──
+    const apForm = document.getElementById('st-ap-form');
+    if (apForm) {
+      // Live preview updater
+      function apUpdatePreview() {
+        const accent = document.getElementById('ap-accent').value || '#b02a37';
+        const navy   = document.getElementById('ap-navy').value   || '#5e1d27';
+        const name   = document.getElementById('ap-sysname').value || 'AD Kasutajahaldus';
+        const org    = document.getElementById('ap-orgname').value || 'Viljandi Haigla';
+        const el = id => document.getElementById(id);
+        if (el('ap-prev-sb'))    el('ap-prev-sb').style.background = navy;
+        if (el('ap-prev-logo'))  el('ap-prev-logo').style.background = accent;
+        if (el('ap-prev-btn'))   { el('ap-prev-btn').style.background = accent; }
+        if (el('ap-prev-badge')) { el('ap-prev-badge').style.background = accent + '22'; el('ap-prev-badge').style.color = accent; }
+        if (el('ap-prev-name'))  el('ap-prev-name').textContent = name;
+        if (el('ap-prev-org'))   el('ap-prev-org').textContent = org;
+      }
+
+      const COLOR_PRESETS_LOCAL = [
+        { id:'burgundy', label:'Burgundia', accent:'#b02a37', navy:'#5e1d27', navy2:'#4a141d', navy3:'#74303c' },
+        { id:'blue',     label:'Sinine',    accent:'#2563eb', navy:'#1e3a8a', navy2:'#1e3799', navy3:'#1d4ed8' },
+        { id:'teal',     label:'Roheline',  accent:'#0d9488', navy:'#134e4a', navy2:'#0f3d3a', navy3:'#1a5c58' },
+        { id:'violet',   label:'Lilla',     accent:'#7c3aed', navy:'#3b1a6b', navy2:'#2e1357', navy3:'#552a9e' },
+        { id:'emerald',  label:'Smaragd',   accent:'#16a34a', navy:'#064e3b', navy2:'#053d2f', navy3:'#0a6b52' },
+        { id:'slate',    label:'Hallsinine',accent:'#475569', navy:'#1e293b', navy2:'#0f172a', navy3:'#334155' },
+      ];
+      function _presetLabel(hex) {
+        return (COLOR_PRESETS_LOCAL.find(p => p.accent === hex) || {}).label || 'Kohandatud';
+      }
+
+      // Preset swatch clicks
+      apForm.querySelectorAll('.color-swatch').forEach(sw => {
+        sw.addEventListener('click', () => {
+          apForm.querySelectorAll('.color-swatch').forEach(s => {
+            s.classList.remove('selected');
+            s.innerHTML = '';
+          });
+          sw.classList.add('selected');
+          sw.innerHTML = '<span style="width:10px;height:10px;border-radius:50%;background:#fff;display:block;margin:auto;opacity:.9"></span>';
+          const accent = sw.dataset.accent;
+          document.getElementById('ap-accent').value  = accent;
+          document.getElementById('ap-navy').value    = sw.dataset.navy;
+          document.getElementById('ap-navy2').value   = sw.dataset.navy2;
+          document.getElementById('ap-navy3').value   = sw.dataset.navy3;
+          document.getElementById('ap-custom-color').value = accent;
+          document.getElementById('ap-custom-hex').value   = accent;
+          // update label next to swatches
+          const lbl = sw.parentElement?.querySelector('span:last-child');
+          if (lbl) lbl.textContent = _presetLabel(accent);
+          apUpdatePreview();
+        });
+      });
+
+      function _deselectSwatches() {
+        apForm.querySelectorAll('.color-swatch').forEach(s => { s.classList.remove('selected'); s.innerHTML = ''; });
+        const lbl = apForm.querySelector('.color-swatch')?.parentElement?.querySelector('span:last-child');
+        if (lbl) lbl.textContent = 'Kohandatud';
+      }
+
+      // Custom color picker
+      document.getElementById('ap-custom-color')?.addEventListener('input', (e) => {
+        const hex = e.target.value;
+        document.getElementById('ap-custom-hex').value = hex;
+        document.getElementById('ap-accent').value = hex;
+        _deselectSwatches();
+        apUpdatePreview();
+      });
+      document.getElementById('ap-custom-hex')?.addEventListener('input', (e) => {
+        const hex = e.target.value;
+        if (/^#[0-9a-fA-F]{6}$/.test(hex)) {
+          document.getElementById('ap-custom-color').value = hex;
+          document.getElementById('ap-accent').value = hex;
+          _deselectSwatches();
+          apUpdatePreview();
+        }
+      });
+
+      // System name / org live preview
+      document.getElementById('ap-sysname')?.addEventListener('input', apUpdatePreview);
+      document.getElementById('ap-orgname')?.addEventListener('input', apUpdatePreview);
+
+      // ── Logo upload with inline resize ──
+      let _logoResizeImg = null;
+
+      function _drawResizeCanvas() {
+        if (!_logoResizeImg) return;
+        const slider = document.getElementById('ap-resize-slider');
+        const maxW = parseInt(slider.value);
+        const img  = _logoResizeImg;
+        const scale = Math.min(maxW / img.width, maxW / img.height, 1);
+        const w = Math.max(1, Math.round(img.width  * scale));
+        const h = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.getElementById('ap-resize-canvas');
+        canvas.width  = w;
+        canvas.height = h;
+        canvas.style.width  = Math.min(w, 180) + 'px';
+        canvas.style.height = Math.min(h, 180) + 'px';
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+        const outEl = document.getElementById('ap-resize-out');
+        const valEl = document.getElementById('ap-resize-slider-val');
+        if (outEl) outEl.textContent = w + '×' + h + ' px';
+        if (valEl) valEl.textContent = maxW;
+      }
+
+      async function _doLogoUpload(dataUrl) {
+        try {
+          const res = await API.uploadLogo(dataUrl);
+          self._settings = res.settings;
+          const newA = res.settings.appearance || {};
+          App.state.appearance = newA;
+          App.applyAppearance(newA);
+          localStorage.setItem('appearance', JSON.stringify(newA));
+          App.renderSidebar();
+          App.toast('ok', 'Logo üles laetud', '');
+          self._renderSettings(container);
+        } catch (err) {
+          App.toast('bad', 'Logo laadimine ebaõnnestus', err.message);
+        }
+      }
+
+      document.getElementById('ap-logo-input')?.addEventListener('change', (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+
+        if (file.type === 'image/svg+xml') {
+          // SVG: read as dataURL and upload directly (no canvas resize)
+          reader.onload = (ev) => _doLogoUpload(ev.target.result);
+          reader.readAsDataURL(file);
+          return;
+        }
+
+        // Raster image → show resize panel
+        reader.onload = (ev) => {
+          const img = new Image();
+          img.onload = () => {
+            _logoResizeImg = img;
+            const origEl  = document.getElementById('ap-resize-orig');
+            const slider  = document.getElementById('ap-resize-slider');
+            if (origEl) origEl.textContent = img.width + '×' + img.height + ' px';
+            if (slider) {
+              slider.max   = Math.min(img.width, 512);
+              slider.value = Math.min(img.width, 256);
+            }
+            _drawResizeCanvas();
+            const panel = document.getElementById('ap-resize-panel');
+            if (panel) panel.style.display = '';
+          };
+          img.src = ev.target.result;
+        };
+        reader.readAsDataURL(file);
+      });
+
+      document.getElementById('ap-resize-slider')?.addEventListener('input', _drawResizeCanvas);
+
+      document.getElementById('ap-resize-confirm')?.addEventListener('click', () => {
+        const canvas = document.getElementById('ap-resize-canvas');
+        if (!canvas) return;
+        const dataUrl = canvas.toDataURL('image/png', 0.95);
+        document.getElementById('ap-resize-panel').style.display = 'none';
+        _logoResizeImg = null;
+        _doLogoUpload(dataUrl);
+      });
+
+      document.getElementById('ap-resize-cancel')?.addEventListener('click', () => {
+        document.getElementById('ap-resize-panel').style.display = 'none';
+        _logoResizeImg = null;
+        const inp = document.getElementById('ap-logo-input');
+        if (inp) inp.value = '';
+      });
+
+      // Logo remove
+      document.getElementById('ap-logo-remove')?.addEventListener('click', async () => {
+        try {
+          const res = await API.deleteLogo();
+          self._settings = res.settings;
+          const newA = res.settings.appearance || {};
+          App.state.appearance = newA;
+          App.applyAppearance(newA);
+          localStorage.setItem('appearance', JSON.stringify(newA));
+          App.renderSidebar();
+          App.toast('ok', 'Logo eemaldatud', '');
+          self._renderSettings(container);
+        } catch (err) {
+          App.toast('bad', 'Logo eemaldamine ebaõnnestus', err.message);
+        }
+      });
+
+      // Appearance form submit
+      apForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const data = {
+          systemName:  document.getElementById('ap-sysname').value.trim()  || 'AD Kasutajahaldus',
+          orgName:     document.getElementById('ap-orgname').value.trim()  || 'Viljandi Haigla',
+          accentColor: document.getElementById('ap-accent').value,
+          navyColor:   document.getElementById('ap-navy').value,
+          navyColor2:  document.getElementById('ap-navy2').value,
+          navyColor3:  document.getElementById('ap-navy3').value,
+        };
+        try {
+          const res = await API.updateSettings('appearance', data);
+          self._settings = res.settings;
+          const newA = res.settings.appearance || {};
+          App.state.appearance = newA;
+          App.applyAppearance(newA);
+          localStorage.setItem('appearance', JSON.stringify(newA));
+          App.renderSidebar();
+          App.toast('ok', 'Kujundus salvestatud', '');
+        } catch (err) {
+          App.toast('bad', 'Salvestamine ebaõnnestus', err.message);
+        }
+      });
+    }
+
+    // ── UI form ──
+    const uiForm = document.getElementById('st-ui-form');
+    if (uiForm) {
+      uiForm.querySelectorAll('[data-prefix]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          uiForm.querySelectorAll('[data-prefix]').forEach(b => b.classList.remove('primary'));
+          btn.classList.add('primary');
+          document.getElementById('su-prefix').value = btn.dataset.prefix;
+        });
+      });
+      uiForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const data = {
+          usernamePrefix: document.getElementById('su-prefix').value || '1',
+          showManager:    document.getElementById('su-manager').checked,
+        };
+        await self._save('ui', data, container);
+      });
+    }
+
+    // ── Roles form ──
+    document.getElementById('st-roles-form')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const data = {
+        hrGroup:    document.getElementById('sr-hrgroup').value.trim(),
+        adminGroup: document.getElementById('sr-admingroup').value.trim(),
+      };
+      await self._save('roles', data, container);
     });
 
     // ── LDAP form ──
@@ -430,13 +939,16 @@ Views.Settings = {
     // ── Template form ──
     document.getElementById('st-tmpl-form')?.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const data = {
-        [self._tmplTab]: {
-          subject: document.getElementById('st-subject').value.trim(),
-          body:    document.getElementById('st-body').value,
-        }
+      const chan = document.getElementById('st-chan').value;
+      const key  = document.getElementById('st-key').value;
+      const tplData = {
+        enabled: document.getElementById('st-enabled').checked,
+        body:    document.getElementById('st-body').value,
       };
-      await self._save('templates', data, container);
+      if (chan === 'email') {
+        tplData.subject = document.getElementById('st-subject')?.value?.trim() || '';
+      }
+      await self._save('templates', { [chan]: { [key]: tplData } }, container);
     });
 
     // ── Log tab ──
