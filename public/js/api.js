@@ -68,7 +68,8 @@ const API = (() => {
     getGroups: () => get('/api/groups'),
 
     // Audit
-    getAudit: (limit = 200) => get('/api/audit?limit=' + limit),
+    getAudit:        (limit = 200) => get('/api/audit?limit=' + limit),
+    getAuditForUser: (sam)         => get('/api/audit?user=' + encodeURIComponent(sam)),
 
     // Public config (no auth needed)
     getConfig: () => get('/api/config'),
@@ -86,12 +87,27 @@ const API = (() => {
     uploadLogo: (dataUrl) => post('/api/settings/logo', { dataUrl }),
     deleteLogo: () => del('/api/settings/logo'),
 
+    // Services (Teenuste õiguste haldus)
+    getServices:              ()              => get('/api/services'),
+    getUserServices:          (sam)           => get('/api/services/user/' + encodeURIComponent(sam)),
+    createService:            (data)          => post('/api/services', data),
+    updateService:            (id, data)      => put('/api/services/' + id, data),
+    deleteService:            (id)            => del('/api/services/' + id),
+    getServiceGroupMembers:   (id, gname)     => get('/api/services/' + id + '/groups/' + encodeURIComponent(gname) + '/members'),
+    createServiceGroup:       (id, data)      => post('/api/services/' + id + '/groups', data),
+    deleteServiceGroup:       (id, gname)     => del('/api/services/' + id + '/groups/' + encodeURIComponent(gname)),
+    addServiceGroupMember:    (id, gname, sam) => post('/api/services/' + id + '/groups/' + encodeURIComponent(gname) + '/members', { sam }),
+    removeServiceGroupMember: (id, gname, sam) => del('/api/services/'  + id + '/groups/' + encodeURIComponent(gname) + '/members/' + encodeURIComponent(sam)),
+
     // Requests (HR approval workflow)
-    getRequests:      ()           => get('/api/requests'),
-    getRequestsCount: ()           => get('/api/requests/count'),
-    submitRequest:    (data)       => post('/api/requests', data),
-    approveRequest:   (id, data)   => post('/api/requests/' + id + '/approve', data),
-    rejectRequest:    (id, reason) => post('/api/requests/' + id + '/reject', { reason }),
-    deleteRequest:    (id)         => del('/api/requests/' + id),
+    getRequests:         ()                   => get('/api/requests'),
+    getRequestsCount:    ()                   => get('/api/requests/count'),
+    submitRequest:       (data)               => post('/api/requests', data),
+    submitModifyRequest: (targetSam, changes, reason) => post('/api/requests', { type:'modify', targetSam, changes, reason }),
+    submitDisableRequest:(targetSam, reason)  => post('/api/requests', { type:'disable', targetSam, reason }),
+    submitDeleteRequest: (targetSam, reason)  => post('/api/requests', { type:'delete',  targetSam, reason }),
+    approveRequest:      (id, data)           => post('/api/requests/' + id + '/approve', data),
+    rejectRequest:       (id, reason)         => post('/api/requests/' + id + '/reject', { reason }),
+    deleteRequest:       (id)                 => del('/api/requests/' + id),
   };
 })();

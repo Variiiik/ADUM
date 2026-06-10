@@ -175,6 +175,7 @@ const App = {
       users:     () => Views.Users.render(content, this.state.params),
       userDetail:() => Views.UserDetail.render(content, this.state.params.sam),
       groups:    () => Views.Groups.render(content),
+      services:  () => Views.Services.render(content),
       audit:     () => Views.AuditLog.render(content),
       settings:  () => Views.Settings.render(content),
       requests:  () => Views.Requests.render(content),
@@ -282,15 +283,18 @@ const App = {
       { id:'requests',  label:'Taotlused',  ic:'clipboard', badge: pendingBadge },
       { sec: 'Haldus' },
       { id:'groups',    label:'Grupid',     ic:'group'     },
+      { id:'services',  label:'Teenused',   ic:'briefcase' },
       { sec: 'Süsteem' },
       { id:'settings',  label:'Seaded',     ic:'settings'  },
       { id:'audit',     label:'Auditilogi', ic:'audit'     },
     ];
     const NAV_HR = [
       { sec: 'Üldine' },
-      { id:'dashboard', label:'Töölaud',    ic:'dashboard' },
-      { id:'users',     label:'Kasutajad',  ic:'users'     },
-      { id:'requests',  label:'Minu taotlused', ic:'clipboard' },
+      { id:'dashboard', label:'Töölaud',       ic:'dashboard' },
+      { id:'users',     label:'Kasutajad',     ic:'users'     },
+      { id:'requests',  label:'Minu taotlused',ic:'clipboard' },
+      { sec: 'Teenused' },
+      { id:'services',  label:'Teenused',      ic:'briefcase' },
     ];
     const NAV = isHR ? NAV_HR : NAV_ADMIN;
 
@@ -345,6 +349,7 @@ const App = {
       users:      { t:'Kasutajad',     c:'Active Directory kontode haldus' },
       userDetail: { t:'Kasutaja profiil', c:'Kasutajad › Profiil' },
       groups:     { t:'Grupid',        c:'Turbe- ja jaotusrühmad' },
+      services:   { t:'Teenused',     c:'Haldus › Teenuste õigused' },
       audit:      { t:'Auditilogi',    c:'Süsteemi sündmused' },
       settings:   { t:'Seaded',        c:'Süsteemi konfiguratsioon' },
       requests:   { t:'Taotlused',     c:'Konto loomise taotlused' },

@@ -9,6 +9,15 @@ const audit      = require('../lib/audit');
 const { requireAdmin } = require('../middleware/auth');
 const { createUser } = require('../lib/createUser');
 
+// Windows FILETIME (100ns ticks since 1601-01-01) → ISO string, or null if absent/zero
+function winFileTimeToIso(raw) {
+  if (!raw || raw === '0') return null;
+  const ticks = BigInt(raw);
+  const ms = Number(ticks / 10000n) - 11644473600000;
+  if (ms <= 0) return null;
+  return new Date(ms).toISOString();
+}
+
 // Map a raw LDAP object to a clean user record
 // Safely read an attribute — tries original key, then lowercase
 function str(e, ...keys) {
@@ -47,11 +56,12 @@ function mapUser(e) {
     manager:           str(e, 'manager') || null,
     telephoneNumber:   str(e, 'telephoneNumber'),
     employeeID:        str(e, 'employeeID', 'employeeId'),
+    employeeNumber:    str(e, 'employeeNumber'),
     ou:                dn ? dn.split(',').slice(1).join(',') : '',
     dn,
     status:            lc.computeStatus(uac, lockT),
     lockoutTime:       lockT || null,
-    lastLogon:         str(e, 'lastLogon') || null,
+    lastLogon:         winFileTimeToIso(str(e, 'lastLogon')),
     pwdLastSet:        str(e, 'pwdLastSet') || null,
     pwNeverExpires:    !!(uac & 0x10000),
     mustChangePw:      str(e, 'pwdLastSet') === '0',
@@ -89,7 +99,7 @@ router.get('/', async (req, res) => {
     }
     const attrs = ['sAMAccountName','displayName','givenName','sn','mail','department','title',
       'userAccountControl','lockoutTime','lastLogon','telephoneNumber','distinguishedName','memberOf',
-      'userPrincipalName','employeeID','pwdLastSet'];
+      'userPrincipalName','employeeID','employeeNumber','pwdLastSet'];
     let results = await lc.searchUsers(filter, attrs);
     let users   = results.map(mapUser).filter(Boolean);
     if (dept)   users = users.filter(u => u.department === dept);
@@ -162,21 +172,22 @@ router.put('/:sam', async (req, res) => {
   const { sam } = req.params;
   const actor   = req.session.user.sam;
   if (!validateSam(sam)) return res.status(400).json({ error: 'Vigane kasutajanimi.' });
-  const { givenName, sn, mail, department, title, manager } = req.body;
+  const { givenName, sn, mail, department, title, manager, employeeNumber } = req.body;
 
   try {
     if (lc.MOCK_AD) {
       const idx = lc.MOCK_USERS.findIndex(u => u.sam === sam);
       if (idx === -1) return res.status(404).json({ error: 'Kasutajat ei leitud.' });
       const u = lc.MOCK_USERS[idx];
-      if (givenName !== undefined) u.givenName = givenName;
-      if (sn !== undefined)        u.sn = sn;
+      if (givenName !== undefined)       u.givenName = givenName;
+      if (sn !== undefined)              u.sn = sn;
       if (givenName !== undefined || sn !== undefined)
         u.displayName = (u.givenName || '') + ' ' + (u.sn || '');
-      if (mail !== undefined)       u.mail = mail;
-      if (department !== undefined) u.department = department;
-      if (title !== undefined)      u.title = title;
-      if (manager !== undefined)    u.manager = manager;
+      if (mail !== undefined)            u.mail = mail;
+      if (department !== undefined)      u.department = department;
+      if (title !== undefined)           u.title = title;
+      if (manager !== undefined)         u.manager = manager;
+      if (employeeNumber !== undefined)  u.employeeNumber = employeeNumber;
       audit.logEvent(actor, 'MODIFY_USER', sam, 'success');
       return res.json({ ok: true });
     }
@@ -193,12 +204,13 @@ router.put('/:sam', async (req, res) => {
     await bind(client);
 
     const changes = ldapChanges([
-      { op: 'replace', type: 'givenName',   val: givenName },
-      { op: 'replace', type: 'sn',           val: sn },
-      { op: 'replace', type: 'mail',         val: mail },
-      { op: 'replace', type: 'displayName',  val: givenName && sn ? `${givenName.trim()} ${sn.trim()}` : undefined },
-      { op: 'replace', type: 'department',   val: department },
-      { op: 'replace', type: 'title',        val: title },
+      { op: 'replace', type: 'givenName',      val: givenName },
+      { op: 'replace', type: 'sn',             val: sn },
+      { op: 'replace', type: 'mail',           val: mail },
+      { op: 'replace', type: 'displayName',    val: givenName && sn ? `${givenName.trim()} ${sn.trim()}` : undefined },
+      { op: 'replace', type: 'department',     val: department },
+      { op: 'replace', type: 'title',          val: title },
+      { op: 'replace', type: 'employeeNumber', val: employeeNumber },
       manager !== undefined ? { op: manager ? 'replace' : 'delete', type: 'manager', val: manager || undefined } : null,
     ]);
 
@@ -261,13 +273,27 @@ router.post('/:sam/reset-password', async (req, res) => {
       if (!u) return res.status(404).json({ error: 'Kasutajat ei leitud.' });
       u.pwdLastSet = new Date().toISOString();
       audit.logEvent(actor, 'RESET_PASSWORD', sam, 'success');
-      return res.json({ ok: true });
+      let smsResult;
+      if (u.telephoneNumber) {
+        smsResult = { ok: true, simulated: true };
+        audit.logEvent(actor, 'SMS_SENT', sam, 'success', `Simuleeritud → ${u.telephoneNumber}`);
+      } else {
+        smsResult = { ok: false, reason: 'Telefoninumber puudub' };
+        audit.logEvent(actor, 'SMS_SENT', sam, 'warning', 'Telefoninumber puudub');
+      }
+      return res.json({ ok: true, sms: smsResult });
     }
 
     const ldapjs = require('ldapjs');
-    const r = await lc.searchUsers(`(&(objectClass=user)(sAMAccountName=${lc.escapeLdap(sam)}))`, ['distinguishedName']);
+    const r = await lc.searchUsers(
+      `(&(objectClass=user)(sAMAccountName=${lc.escapeLdap(sam)}))`,
+      ['distinguishedName', 'displayName', 'telephoneNumber']
+    );
     if (!r.length) return res.status(404).json({ error: 'Kasutajat ei leitud.' });
-    const dn = getDN(r);
+    const dn          = getDN(r);
+    const displayName = r[0].displayname || r[0].displayName || sam;
+    const phone       = r[0].telephonenumber || r[0].telephoneNumber || '';
+
     const client = lc.createClient();
     await bind(client);
     const pwBuf = Buffer.from(`"${password}"`, 'utf16le');
@@ -276,7 +302,17 @@ router.post('/:sam/reset-password', async (req, res) => {
     })]);
     client.unbind();
     audit.logEvent(actor, 'RESET_PASSWORD', sam, 'success');
-    res.json({ ok: true });
+
+    let smsResult;
+    if (phone) {
+      smsResult = await trySendSms(sam, password, phone, displayName, 'passwordReset');
+      audit.logEvent(actor, 'SMS_SENT', sam, smsResult.ok ? 'success' : 'warning',
+        smsResult.reason || phone);
+    } else {
+      smsResult = { ok: false, reason: 'Telefoninumber puudub' };
+      audit.logEvent(actor, 'SMS_SENT', sam, 'warning', 'Telefoninumber puudub');
+    }
+    res.json({ ok: true, sms: smsResult });
   } catch (err) {
     audit.logEvent(actor, 'RESET_PASSWORD', sam, 'failure', err.message);
     console.error('[users] reset-password:', err.message);
@@ -498,7 +534,7 @@ async function setUAC(sam, disable) {
 
 // ─── SMS helper ──────────────────────────────────────────────────────────────
 
-async function trySendSms(username, password, phone, displayName) {
+async function trySendSms(username, password, phone, displayName, templateKey = 'newAccount') {
   const settingsFile = path.join(__dirname, '..', 'config', 'settings.json');
   let settings = {};
   try {
@@ -508,11 +544,14 @@ async function trySendSms(username, password, phone, displayName) {
   const sms = settings.sms || {};
   if (!sms.enabled) return { ok: false, reason: 'SMS pole seadistatud' };
 
-  const smsTpl = settings.templates?.sms?.newAccount;
+  const smsTpl = settings.templates?.sms?.[templateKey];
   if (smsTpl && smsTpl.enabled === false) return { ok: false, reason: 'SMS mall on keelatud' };
 
-  const tplBody = smsTpl?.body ||
-    'Teie uus AD konto:\nKasutajanimi: {{username}}\nAjutine parool: {{password}}\nPalun vahetage parool esimesel sisselogimisel.';
+  const defaultBodies = {
+    newAccount:    'Teie uus AD konto:\nKasutajanimi: {{username}}\nAjutine parool: {{password}}\nPalun vahetage parool esimesel sisselogimisel.',
+    passwordReset: 'Tere {{displayName}}!\n\nTeie AD konto parool on lähtestatud.\nKasutajanimi: {{username}}\nUus parool: {{password}}\n\nPalun vahetage parool esimesel sisselogimisel.',
+  };
+  const tplBody = smsTpl?.body || defaultBodies[templateKey] || defaultBodies.newAccount;
 
   const msg = tplBody
     .replace(/\{\{username\}\}/g,    username)

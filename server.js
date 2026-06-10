@@ -9,19 +9,28 @@ const path = require('path');
 const crypto = require('crypto');
 const fs = require('fs');
 
+const MySQLStore     = require('express-mysql-session')(session);
 const authRouter     = require('./routes/auth');
 const usersRouter    = require('./routes/users');
 const groupsRouter   = require('./routes/groups');
+const servicesRouter = require('./routes/services');
 const settingsRouter = require('./routes/settings');
 const requestsRouter = require('./routes/requests');
 const { requireAuth } = require('./middleware/auth');
-const audit = require('./lib/audit');
+const audit   = require('./lib/audit');
+const { migrate } = require('./lib/migrate');
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const isProd = process.env.NODE_ENV === 'production';
 // Cookie Secure flag requires HTTPS — set HTTPS=true only when running behind TLS
 const useSecureCookie = process.env.HTTPS === 'true';
+
+// Trust one proxy hop (Nginx) so Express reads the real client IP from
+// X-Forwarded-For — required for correct rate limiting and logging behind a proxy
+if (process.env.TRUST_PROXY === 'true' || isProd) {
+  app.set('trust proxy', 1);
+}
 
 if (!process.env.SESSION_SECRET || process.env.SESSION_SECRET.length < 32) {
   console.warn('[SECURITY] SESSION_SECRET is missing or too short. Use a random 64-char string in production.');
@@ -72,9 +81,22 @@ app.use(express.urlencoded({ extended: false, limit: '512kb' }));
 
 // Session
 const sessionSecret = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
+const sessionStore = new MySQLStore({
+  host:                    process.env.DB_HOST || 'localhost',
+  port:                    parseInt(process.env.DB_PORT || '3306', 10),
+  user:                    process.env.DB_USER || 'root',
+  password:                process.env.DB_PASS || '',
+  database:                process.env.DB_NAME || 'adum',
+  clearExpired:            true,
+  checkExpirationInterval: 15 * 60 * 1000,
+  expiration:              8 * 60 * 60 * 1000,
+  createDatabaseTable:     true,
+  endConnectionOnClose:    true,
+});
 app.use(session({
   secret: sessionSecret,
   name: 'sid',
+  store: sessionStore,
   resave: false,
   saveUninitialized: false,
   rolling: true,
@@ -82,7 +104,7 @@ app.use(session({
     httpOnly: true,
     secure: useSecureCookie,
     sameSite: 'strict',
-    maxAge: 8 * 60 * 60 * 1000, // 8 hours
+    maxAge: 8 * 60 * 60 * 1000,
   },
 }));
 
@@ -205,13 +227,23 @@ app.get('/api/settings/logo', (req, res) => {
 app.use('/api/auth',     authRouter);
 app.use('/api/users',    requireAuth, usersRouter);
 app.use('/api/groups',   requireAuth, groupsRouter);
+app.use('/api/services', requireAuth, servicesRouter);
 app.use('/api/settings', requireAuth, settingsRouter);
 app.use('/api/requests', requireAuth, requestsRouter);
 
 // Audit log endpoint
-app.get('/api/audit', requireAuth, (req, res) => {
+app.get('/api/audit', requireAuth, async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit || '200', 10), 500);
-  res.json({ entries: audit.getLog(limit) });
+  const user  = req.query.user ? String(req.query.user).trim() : null;
+  try {
+    const entries = user
+      ? await audit.getLogForUser(user)
+      : await audit.getLog(limit);
+    res.json({ entries });
+  } catch (err) {
+    console.error('[audit]', err.message);
+    res.status(500).json({ error: 'Auditilogide laadimine ebaõnnestus.' });
+  }
 });
 
 // SPA fallback
@@ -227,10 +259,17 @@ app.use((err, req, res, _next) => {
   res.status(status).json({ error: isProd ? 'Serveriviga. Proovige uuesti.' : err.message });
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`AD Kasutajahaldus käivitub: http://localhost:${PORT}`);
-  console.log(`Keskkond: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`Mock AD: ${process.env.MOCK_AD === 'true' ? 'SEES' : 'VÄLJAS'}`);
-});
+migrate()
+  .then(() => {
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`AD Kasutajahaldus käivitub: http://localhost:${PORT}`);
+      console.log(`Keskkond: ${process.env.NODE_ENV || 'development'}`);
+      console.log(`Mock AD: ${process.env.MOCK_AD === 'true' ? 'SEES' : 'VÄLJAS'}`);
+    });
+  })
+  .catch(err => {
+    console.error('[STARTUP] Andmebaasi migratsioon ebaõnnestus — server ei käivitu:', err.message);
+    process.exit(1);
+  });
 
 module.exports = app;

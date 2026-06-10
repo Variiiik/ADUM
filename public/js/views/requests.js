@@ -50,19 +50,46 @@ Views.Requests = {
         d.toLocaleTimeString('et-EE', { hour:'2-digit', minute:'2-digit' });
     };
 
+    const TYPE_META = {
+      create:  { lbl:'Uus konto',  ic:'userPlus', bg:'var(--accent-weak)', fg:'var(--accent)'   },
+      modify:  { lbl:'Muutmine',   ic:'edit',     bg:'var(--ok-bg)',       fg:'var(--ok-ink)'   },
+      disable: { lbl:'Keelamine',  ic:'ban',      bg:'var(--warn-bg)',     fg:'var(--warn-ink)' },
+      delete:  { lbl:'Kustutamine',ic:'trash',    bg:'var(--bad-bg)',      fg:'var(--bad-ink)'  },
+    };
+
+    function reqSubject(r) {
+      const d = r.data || {};
+      const t = r.type || 'create';
+      if (t === 'create')  return { name: `${d.givenName||''} ${d.sn||''}`.trim(), sub: d.department||'' };
+      if (t === 'modify')  return { name: d.targetSam||'', sub: Object.keys(d.changes||{}).join(', ') };
+      if (t === 'disable') return { name: d.targetSam||'', sub: d.reason||'' };
+      if (t === 'delete')  return { name: d.targetSam||'', sub: d.reason||'' };
+      return { name:'', sub:'' };
+    }
+
     const rowsHtml = filtered.length === 0
       ? `<tr><td colspan="7"><div class="empty" style="padding:36px">
           ${icon('briefcase',40)}<div>Taotlusi ei ole.</div>
          </div></td></tr>`
       : filtered.map(r => {
-          const d = r.data || {};
+          const d    = r.data || {};
+          const t    = r.type || 'create';
+          const tm   = TYPE_META[t] || TYPE_META.create;
+          const subj = reqSubject(r);
           return `<tr data-id="${esc(r.id)}">
             <td>
-              <div style="font-weight:600;font-size:13.5px">${esc(d.givenName||'')} ${esc(d.sn||'')}</div>
-              <div style="font-size:12px;color:var(--ink-3)">${esc(d.department||'')}</div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:2px 7px;border-radius:99px;background:${tm.bg};color:${tm.fg};white-space:nowrap;flex-shrink:0">
+                  ${icon(tm.ic,11)} ${esc(tm.lbl)}
+                </span>
+                <div>
+                  <div style="font-weight:600;font-size:13.5px">${esc(subj.name)}</div>
+                  <div style="font-size:12px;color:var(--ink-3)">${esc(subj.sub)}</div>
+                </div>
+              </div>
             </td>
-            <td><span class="mono">${esc(d.username||'')}</span></td>
-            <td class="muted">${esc(d.mail||'')}</td>
+            <td><span class="mono">${esc(t==='create' ? d.username||'' : d.targetSam||'')}</span></td>
+            <td class="muted">${esc(t==='create' ? d.mail||'' : '')}</td>
             ${isAdmin ? `<td>${esc(r.submittedByName||r.submittedBy)}</td>` : ''}
             <td class="muted" style="font-size:12px;white-space:nowrap">${esc(fmtDT(r.submittedAt))}</td>
             <td>${statusBadgeReq(r.status)}
@@ -140,41 +167,54 @@ Views.Requests = {
   _doApprove(id, container) {
     const item = this._requests.find(r => r.id === id);
     if (!item) return;
-    const d = item.data || {};
+    const d    = item.data || {};
+    const type = item.type || 'create';
+
+    if (type === 'create') {
+      App.confirm(
+        'Kinnita konto loomine',
+        `Luuakse konto kasutajale ${d.givenName || ''} ${d.sn || ''} (${d.username || ''}).`,
+        async (password) => {
+          if (!password || password.length < 8) { App.toast('warn','Parool liiga lühike','Vähemalt 8 tähemärki.'); return; }
+          try {
+            await API.approveRequest(id, { password });
+            App.toast('ok', 'Konto loodud', `${d.givenName||''} ${d.sn||''} · ${d.username||''}`);
+            await this.render(container);
+            App.renderSidebar();
+          } catch (err) { App.toast('bad','Kinnitamine ebaõnnestus', err.message); }
+        },
+        { icon:'checkCircle', danger:false, confirmLabel:'Loo konto',
+          inputLabel:`Parool kasutajale ${d.username||''}`, inputType:'text',
+          inputPlaceholder: d.password||'••••••••', inputBtn:'Genereeri', inputHint:'Parool saadetakse kasutajale' }
+      );
+      requestAnimationFrame(() => {
+        const inp = document.getElementById('modal-input');
+        if (inp && d.password) inp.value = d.password;
+      });
+      return;
+    }
+
+    // modify / disable / delete
+    const TYPE_LABELS = { modify:'Kinnita muutmine', disable:'Kinnita keelamine', delete:'Kinnita kustutamine' };
+    const TYPE_DESCS  = {
+      modify:  `Kasutaja ${d.targetSam} andmeid muudetakse: ${Object.entries(d.changes||{}).map(([k,v])=>`${k}→${v}`).join(', ')}`,
+      disable: `Kasutaja ${d.targetSam} konto keelatakse.${d.reason ? ' Põhjus: '+d.reason : ''}`,
+      delete:  `Kasutaja ${d.targetSam} kustutatakse jäädavalt!${d.reason ? ' Põhjus: '+d.reason : ''}`,
+    };
+    const isDanger = type === 'delete';
     App.confirm(
-      'Kinnita konto loomine',
-      `Luuakse konto kasutajale ${d.givenName || ''} ${d.sn || ''} (${d.username || ''}).`,
-      async (password) => {
-        if (!password || password.length < 8) {
-          App.toast('warn', 'Parool liiga lühike', 'Vähemalt 8 tähemärki.');
-          return;
-        }
+      TYPE_LABELS[type] || 'Kinnita',
+      TYPE_DESCS[type]  || '',
+      async () => {
         try {
-          await API.approveRequest(id, { password });
-          App.toast('ok', 'Konto loodud', `${d.givenName || ''} ${d.sn || ''} · ${d.username || ''}`);
+          await API.approveRequest(id, {});
+          App.toast('ok', 'Kinnitatud', d.targetSam);
           await this.render(container);
           App.renderSidebar();
-        } catch (err) {
-          App.toast('bad', 'Kinnitamine ebaõnnestus', err.message);
-        }
+        } catch (err) { App.toast('bad','Viga', err.message); }
       },
-      {
-        icon:             'checkCircle',
-        danger:           false,
-        confirmLabel:     'Loo konto',
-        cancelLabel:      'Loobu',
-        inputLabel:       `Parool kasutajale ${d.username || ''}`,
-        inputType:        'text',
-        inputPlaceholder: d.password || '••••••••',
-        inputBtn:         'Genereeri',
-        inputHint:        'Parool saadetakse kasutajale',
-      }
+      { icon: isDanger ? 'trash' : 'checkCircle', danger: isDanger, confirmLabel:'Kinnita' }
     );
-    // Pre-fill with submitted password after modal renders
-    requestAnimationFrame(() => {
-      const inp = document.getElementById('modal-input');
-      if (inp && d.password) inp.value = d.password;
-    });
   },
 
   _doReject(id, container) {
@@ -225,18 +265,28 @@ Views.Requests = {
   _showDetail(id) {
     const item = this._requests.find(r => r.id === id);
     if (!item) return;
-    const d = item.data || {};
-    const rows = [
-      ['Eesnimi', d.givenName],
-      ['Perekonnanimi', d.sn],
-      ['Kasutajanimi', d.username],
-      ['E-post', d.mail],
-      ['Osakond', d.department],
-      ['Ametinimetus', d.title],
-      ['Telefon', d.telephoneNumber],
-      ['Juht', d.manager],
-      ['AD asukoht', d.ou],
-    ].filter(r => r[1]);
+    const d    = item.data || {};
+    const type = item.type || 'create';
+
+    let rows;
+    if (type === 'create') {
+      rows = [
+        ['Eesnimi', d.givenName], ['Perekonnanimi', d.sn], ['Kasutajanimi', d.username],
+        ['E-post', d.mail], ['Osakond', d.department], ['Ametinimetus', d.title],
+        ['Telefon', d.telephoneNumber], ['Juht', d.manager], ['AD asukoht', d.ou],
+      ].filter(r => r[1]);
+    } else if (type === 'modify') {
+      rows = [
+        ['Sihtkasutaja', d.targetSam],
+        ...Object.entries(d.changes||{}).map(([k,v]) => [`Muutus: ${k}`, v]),
+        ['Põhjus', d.reason],
+      ].filter(r => r[1]);
+    } else {
+      rows = [
+        ['Sihtkasutaja', d.targetSam],
+        ['Põhjus', d.reason],
+      ].filter(r => r[1]);
+    }
 
     const ovl = document.getElementById('overlay');
     ovl.innerHTML = `

@@ -18,6 +18,9 @@ const DEFAULTS = {
     hrGroup:    'AD-HR',
     adminGroup: '',
   },
+  services: {
+    adAttribute: 'extensionAttribute1',
+  },
   appearance: {
     systemName:  'AD Kasutajahaldus',
     orgName:     'Viljandi Haigla',
@@ -128,7 +131,7 @@ router.get('/', (req, res) => {
   res.json({ settings: mask(load()) });
 });
 
-const VALID_SECTIONS = ['appearance','ui','ldap','email','sms','templates','roles'];
+const VALID_SECTIONS = ['appearance','ui','ldap','email','sms','templates','roles','services'];
 
 // PUT /api/settings
 router.put('/', requireAdmin, (req, res) => {
@@ -158,6 +161,8 @@ router.put('/', requireAdmin, (req, res) => {
       if (data.apiSecret === MASK) settings.sms.apiSecret = load().sms?.apiSecret || '';
     } else if (section === 'roles') {
       settings.roles = { ...(settings.roles || {}), ...data };
+    } else if (section === 'services') {
+      settings.services = { ...(settings.services || {}), ...data };
     } else if (section === 'templates') {
       settings.templates = { ...(settings.templates || {}) };
       ['email', 'sms'].forEach(chan => {

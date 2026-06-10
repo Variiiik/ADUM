@@ -338,6 +338,10 @@ Views.Users = {
 
             <!-- ══ Isikuandmed ══ -->
             <div class="form-sec-title">Isikuandmed</div>
+            <div class="field full">
+              <label>Dokumendi NR / Ringkäigu lehe NR</label>
+              <input class="input mono" id="f-docnr" value="${esc(user?.employeeNumber||'')}" placeholder="D-2024-001" autocomplete="off" />
+            </div>
             <div class="field">
               <label>Eesnimi <span class="req">*</span></label>
               <input class="input" id="f-first" value="${esc(user?.givenName||'')}" placeholder="Mari" autocomplete="off" />
@@ -632,6 +636,7 @@ Views.Users = {
       const ou      = document.getElementById('f-ou').value;
       const titleV  = document.getElementById('f-title-custom')?.value.trim() || '';
       const empid   = document.getElementById('f-empid')?.value.trim() || '';
+      const docnr   = document.getElementById('f-docnr')?.value.trim() || '';
       const manager = document.getElementById('f-manager')?.value || '';
       const phone   = document.getElementById('f-phone')?.value.trim() || '';
       const enabled = document.getElementById('f-enabled').checked;
@@ -676,7 +681,8 @@ Views.Users = {
       try {
         if (isEdit) {
           await API.updateUser(sam, { givenName:fn, sn:ln, mail, department:dept, title:titleV,
-            manager, ou, enabled, employeeID:empid||undefined, telephoneNumber:phone||undefined });
+            manager, ou, enabled, employeeID:empid||undefined, employeeNumber:docnr||undefined,
+            telephoneNumber:phone||undefined });
 
           // Sync group membership
           const oldGroups = user.groups || [];
@@ -693,7 +699,7 @@ Views.Users = {
           await API.submitRequest({
             username:sam, givenName:fn, sn:ln, mail, password:pass,
             department:dept, title:titleV, manager, ou, enabled,
-            telephoneNumber:phone||undefined, sendSms,
+            telephoneNumber:phone||undefined, employeeNumber:docnr||undefined, sendSms,
           });
           App.toast('ok', 'Taotlus esitatud', `${fn} ${ln} · ${sam} — ootel kinnitust`);
           close();
@@ -703,7 +709,7 @@ Views.Users = {
           const result = await API.createUser({
             username:sam, givenName:fn, sn:ln, mail, password:pass,
             department:dept, title:titleV, manager, ou, enabled,
-            telephoneNumber:phone||undefined, sendSms,
+            telephoneNumber:phone||undefined, employeeNumber:docnr||undefined, sendSms,
           });
 
           // Add to extra groups (Haigla-Kõik lisatakse serveris automaatselt)
@@ -761,32 +767,41 @@ Views.Users = {
         this._renderList(container);
       } catch (err) { App.toast('bad','Viga', err.message); }
     } else {
-      App.confirm('Keela konto?', `Kas soovite keelata kasutaja "${u.displayName}" konto?`, async () => {
-        try {
-          await API.disableUser(sam);
-          u.status = 'disabled';
-          App.toast('warn','Konto keelatud', u.displayName);
-          this._renderList(container);
-        } catch (err) { App.toast('bad','Viga', err.message); }
-      }, { icon:'ban', confirmLabel:'Keela konto' });
+      await this._openServiceChecklist('disable', u, container);
     }
   },
 
   async doDelete(sam, container) {
     const u = this._state.users.find(x => x.sam === sam);
-    App.confirm('Kustuta kasutaja?',
-      `Kasutaja "${u?.displayName||sam}" kustutatakse jäädavalt. Seda ei saa tagasi võtta.`,
-      async () => {
-        try {
-          await API.deleteUser(sam);
-          this._state.users = this._state.users.filter(x => x.sam !== sam);
-          this._state.sel.delete(sam);
-          App.toast('bad','Kasutaja kustutatud', u?.displayName||sam);
-          this._renderList(container);
-        } catch (err) { App.toast('bad','Viga', err.message); }
-      },
-      { icon:'trash', confirmLabel:'Kustuta jäädavalt' }
-    );
+    if (!u) return;
+    await this._openServiceChecklist('delete', u, container);
+  },
+
+  async _openServiceChecklist(action, u, container) {
+    const self = this;
+    let userSvcs = [], allSvcs = [];
+    try {
+      const [r1, r2] = await Promise.all([API.getUserServices(u.sam), API.getServices()]);
+      userSvcs = r1.services  || [];
+      allSvcs  = r2.services  || [];
+    } catch { /* proceed without checklist data */ }
+
+    Views.UserDetail._userSvcs  = userSvcs;
+    Views.UserDetail._services  = allSvcs;
+
+    if (action === 'disable') {
+      Views.UserDetail._openDisableChecklist(u, () => {
+        u.status = 'disabled';
+        self._renderList(container);
+      });
+    } else {
+      Views.UserDetail._openDeleteChecklist(u, () => {
+        self._state.users = self._state.users.filter(x => x.sam !== u.sam);
+        self._state.sel.delete(u.sam);
+        App.toast('bad', 'Kasutaja kustutatud', u.displayName);
+        self._renderList(container);
+      });
+    }
   },
 
   async doBulk(action, sams, container) {

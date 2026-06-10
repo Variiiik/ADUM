@@ -33,6 +33,7 @@ Views.Settings = {
       { id:'appearance',label:'Kujundus',        ic:'sun'       },
       { id:'ui',        label:'Kasutajaliides',  ic:'id'        },
       { id:'roles',     label:'Rollid',          ic:'users'     },
+      { id:'services',  label:'Teenused',        ic:'briefcase' },
       { id:'ldap',      label:'LDAP liidestus',  ic:'sliders'   },
       { id:'email',     label:'E-posti seaded',  ic:'mail'      },
       { id:'sms',       label:'SMS liidestus',   ic:'phone'     },
@@ -241,6 +242,25 @@ Views.Settings = {
           </div>
           <div style="display:flex;justify-content:flex-end;margin-top:20px">
             <button type="submit" class="btn primary">${icon('check',16)} Salvesta rollid</button>
+          </div>
+        </form>`;
+    } else if (tab === 'services') {
+      const sv = s.services || {};
+      body = `
+        <form id="st-svc-form">
+          <div style="display:flex;align-items:flex-start;gap:9px;padding:12px 16px;background:var(--accent-weak);color:var(--accent);border-radius:9px;margin-bottom:20px;font-size:13px">
+            ${icon('info',15)} <span>Teenuste moodul salvestab kasutaja teenuserolli (O/T/L) valitud AD atribuuti. Väli peab AD skeemis juba eksisteerima.</span>
+          </div>
+          <div class="form-grid">
+            <div class="form-sec-title">AD atribuut</div>
+            <div class="field full">
+              <label>Atribuudi nimi</label>
+              <input class="input mono" id="sv-adattr" value="${esc(sv.adAttribute||'extensionAttribute1')}" placeholder="extensionAttribute1" autocomplete="off" />
+              <span class="hint">Kasutatakse AD kasutajate atribuudi täitmiseks teenusekoodide ja rollidega (nt <code>ERP:O;HIS:L</code>). Tavaliselt <code>extensionAttribute1</code>…<code>extensionAttribute15</code>.</span>
+            </div>
+          </div>
+          <div style="display:flex;justify-content:flex-end;margin-top:20px">
+            <button type="submit" class="btn primary">${icon('check',16)} Salvesta</button>
           </div>
         </form>`;
     } else if (tab === 'ldap') {
@@ -856,6 +876,13 @@ Views.Settings = {
         await self._save('ui', data, container);
       });
     }
+
+    // ── Services form ──
+    document.getElementById('st-svc-form')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const data = { adAttribute: document.getElementById('sv-adattr').value.trim() || 'extensionAttribute1' };
+      await self._save('services', data, container);
+    });
 
     // ── Roles form ──
     document.getElementById('st-roles-form')?.addEventListener('submit', async (e) => {
