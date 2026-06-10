@@ -223,7 +223,17 @@ app.get('/api/settings/logo', (req, res) => {
   } catch { res.status(404).end(); }
 });
 
+// Login rate limiting — max 10 attempts per IP per 15 minutes
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Liiga palju sisselogimiskatseid. Proovige 15 minuti pärast uuesti.' },
+});
+
 // Routes
+app.use('/api/auth/login', loginLimiter);
 app.use('/api/auth',     authRouter);
 app.use('/api/users',    requireAuth, usersRouter);
 app.use('/api/groups',   requireAuth, groupsRouter);
@@ -233,8 +243,14 @@ app.use('/api/requests', requireAuth, requestsRouter);
 
 // Audit log endpoint
 app.get('/api/audit', requireAuth, async (req, res) => {
-  const limit = Math.min(parseInt(req.query.limit || '200', 10), 500);
-  const user  = req.query.user ? String(req.query.user).trim() : null;
+  const limit    = Math.min(parseInt(req.query.limit || '200', 10), 500);
+  const reqUser  = req.query.user ? String(req.query.user).trim() : null;
+  const isAdmin  = req.session.user?.isAdmin;
+  // Non-admins may only query their own audit entries
+  if (reqUser && reqUser !== req.session.user.sam && !isAdmin) {
+    return res.status(403).json({ error: 'Ligipääs keelatud.' });
+  }
+  const user = reqUser || (isAdmin ? null : req.session.user.sam);
   try {
     const entries = user
       ? await audit.getLogForUser(user)

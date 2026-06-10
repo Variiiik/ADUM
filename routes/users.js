@@ -180,7 +180,7 @@ router.post('/', requireAdmin, async (req, res) => {
 });
 
 // PUT /api/users/:sam — update
-router.put('/:sam', async (req, res) => {
+router.put('/:sam', requireAdmin, async (req, res) => {
   const { sam } = req.params;
   const actor   = req.session.user.sam;
   if (!validateSam(sam)) return res.status(400).json({ error: 'Vigane kasutajanimi.' });
@@ -244,7 +244,7 @@ router.put('/:sam', async (req, res) => {
 });
 
 // DELETE /api/users/:sam
-router.delete('/:sam', async (req, res) => {
+router.delete('/:sam', requireAdmin, async (req, res) => {
   const { sam } = req.params;
   const actor   = req.session.user.sam;
   if (!validateSam(sam)) return res.status(400).json({ error: 'Vigane kasutajanimi.' });
@@ -274,7 +274,7 @@ router.delete('/:sam', async (req, res) => {
 });
 
 // POST /api/users/:sam/reset-password
-router.post('/:sam/reset-password', async (req, res) => {
+router.post('/:sam/reset-password', requireAdmin, async (req, res) => {
   const { sam } = req.params;
   const actor   = req.session.user.sam;
   const { password } = req.body;
@@ -335,7 +335,7 @@ router.post('/:sam/reset-password', async (req, res) => {
 });
 
 // POST /api/users/:sam/enable
-router.post('/:sam/enable', async (req, res) => {
+router.post('/:sam/enable', requireAdmin, async (req, res) => {
   const { sam } = req.params;
   const actor   = req.session.user.sam;
   if (!validateSam(sam)) return res.status(400).json({ error: 'Vigane kasutajanimi.' });
@@ -357,7 +357,7 @@ router.post('/:sam/enable', async (req, res) => {
 });
 
 // POST /api/users/:sam/disable
-router.post('/:sam/disable', async (req, res) => {
+router.post('/:sam/disable', requireAdmin, async (req, res) => {
   const { sam } = req.params;
   const actor   = req.session.user.sam;
   if (!validateSam(sam)) return res.status(400).json({ error: 'Vigane kasutajanimi.' });
@@ -379,7 +379,7 @@ router.post('/:sam/disable', async (req, res) => {
 });
 
 // POST /api/users/:sam/unlock
-router.post('/:sam/unlock', async (req, res) => {
+router.post('/:sam/unlock', requireAdmin, async (req, res) => {
   const { sam } = req.params;
   const actor   = req.session.user.sam;
   if (!validateSam(sam)) return res.status(400).json({ error: 'Vigane kasutajanimi.' });
@@ -410,7 +410,7 @@ router.post('/:sam/unlock', async (req, res) => {
 });
 
 // POST /api/users/:sam/groups/add
-router.post('/:sam/groups/add', async (req, res) => {
+router.post('/:sam/groups/add', requireAdmin, async (req, res) => {
   const { sam } = req.params;
   const { groupName } = req.body;
   const actor = req.session.user.sam;
@@ -451,7 +451,7 @@ router.post('/:sam/groups/add', async (req, res) => {
 });
 
 // POST /api/users/:sam/groups/remove
-router.post('/:sam/groups/remove', async (req, res) => {
+router.post('/:sam/groups/remove', requireAdmin, async (req, res) => {
   const { sam } = req.params;
   const { groupName } = req.body;
   const actor = req.session.user.sam;
@@ -664,9 +664,9 @@ router.post('/:sam/photo', requireAdmin, async (req, res) => {
   const actor   = req.session.user.sam;
   const { dataUrl } = req.body;
   if (!validateSam(sam)) return res.status(400).json({ error: 'Vigane kasutajanimi.' });
-  if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/'))
-    return res.status(400).json({ error: 'Vigane foto formaat.' });
-  const base64 = dataUrl.replace(/^data:image\/[a-z+]+;base64,/, '');
+  if (typeof dataUrl !== 'string' || !/^data:image\/(jpeg|png|webp);base64,/.test(dataUrl))
+    return res.status(400).json({ error: 'Vigane foto formaat. Lubatud: JPEG, PNG, WEBP.' });
+  const base64 = dataUrl.replace(/^data:image\/(jpeg|png|webp);base64,/, '');
   const buf    = Buffer.from(base64, 'base64');
   if (buf.length > 150 * 1024)
     return res.status(413).json({ error: 'Foto on liiga suur (max 150 KB).' });
