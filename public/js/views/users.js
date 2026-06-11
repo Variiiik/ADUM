@@ -155,7 +155,14 @@ Views.Users = {
     // ── Events ──
     const self = this;
 
-    document.getElementById('ul-search').addEventListener('input', (e) => { s.q = e.target.value; s.page=1; self._renderList(container); });
+    document.getElementById('ul-search').addEventListener('input', (e) => {
+      const pos = e.target.selectionStart;
+      s.q = e.target.value;
+      s.page = 1;
+      self._renderList(container);
+      const inp = document.getElementById('ul-search');
+      if (inp) { inp.focus(); inp.setSelectionRange(pos, pos); }
+    });
     document.getElementById('ul-dept').addEventListener('change', (e) => { s.dept = e.target.value; s.page=1; self._renderList(container); });
     document.getElementById('ul-status').addEventListener('change', (e) => { s.status = e.target.value; s.page=1; self._renderList(container); });
     document.getElementById('ul-clear')?.addEventListener('click', () => { s.q=''; s.dept=''; s.status=''; s.page=1; self._renderList(container); });

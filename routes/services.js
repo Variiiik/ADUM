@@ -22,7 +22,8 @@ function _row(row) {
   const owners       = typeof row.owners        === 'string' ? JSON.parse(row.owners)        : (row.owners        || []);
   const rightsGroups = typeof row.rights_groups === 'string' ? JSON.parse(row.rights_groups) : (row.rights_groups || []);
   const members      = typeof row.members       === 'string' ? JSON.parse(row.members)       : (row.members       || []);
-  const groupMembers = typeof row.group_members === 'string' ? JSON.parse(row.group_members) : (row.group_members || {});
+  const groupMembers  = typeof row.group_members  === 'string' ? JSON.parse(row.group_members)  : (row.group_members  || {});
+  const groupIndices  = typeof row.group_indices  === 'string' ? JSON.parse(row.group_indices)  : (row.group_indices  || {});
   return {
     id:              row.id,
     code:            row.code || null,
@@ -34,6 +35,7 @@ function _row(row) {
     members,
     rightsGroups,
     groupMembers,
+    groupIndices,
     createdAt:  row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at,
     updatedAt:  row.updated_at instanceof Date ? row.updated_at.toISOString() : (row.updated_at || null),
   };
@@ -209,8 +211,8 @@ router.post('/', requireAdmin, async (req, res) => {
   const id  = crypto.randomUUID();
   const now = new Date();
   await db.execute(
-    `INSERT INTO services (id, code, name, description, owners, technical_person, members, rights_groups, ad_linked, group_members, created_at)
-     VALUES (?, ?, ?, ?, '[]', NULL, '[]', '[]', ?, '{}', ?)`,
+    `INSERT INTO services (id, code, name, description, owners, technical_person, members, rights_groups, ad_linked, group_members, group_indices, created_at)
+     VALUES (?, ?, ?, ?, '[]', NULL, '[]', '[]', ?, '{}', '{}', ?)`,
     [id, normCode, String(name).trim(), String(description || '').trim(), isAdLinked ? 1 : 0, now]
   );
   const svc = await getService(id);
@@ -302,12 +304,15 @@ router.post('/:id/groups', requireAdmin, async (req, res) => {
   if (!gname) return res.status(400).json({ error: 'Grupi nimi on kohustuslik.' });
   if ((svc.rightsGroups || []).includes(gname)) return res.status(409).json({ error: `Grupp "${gname}" on juba olemas.` });
 
-  const newGroups      = [...(svc.rightsGroups  || []), gname];
+  const newGroups       = [...(svc.rightsGroups  || []), gname];
   const newGroupMembers = { ...(svc.groupMembers || {}), [gname]: [] };
+  const existingIdxs    = Object.values(svc.groupIndices || {});
+  const nextIdx         = existingIdxs.length > 0 ? Math.max(...existingIdxs) + 1 : 1;
+  const newGroupIndices = { ...(svc.groupIndices || {}), [gname]: nextIdx };
 
   await db.execute(
-    'UPDATE services SET rights_groups = ?, group_members = ?, updated_at = ? WHERE id = ?',
-    [JSON.stringify(newGroups), JSON.stringify(newGroupMembers), new Date(), req.params.id]
+    'UPDATE services SET rights_groups = ?, group_members = ?, group_indices = ?, updated_at = ? WHERE id = ?',
+    [JSON.stringify(newGroups), JSON.stringify(newGroupMembers), JSON.stringify(newGroupIndices), new Date(), req.params.id]
   );
   audit.logEvent(req.session.user.sam, 'UPDATE_SERVICE', `${svc.name} / lisa grupp ${gname}`, 'success', svc.code);
   const updated = await getService(req.params.id);
@@ -322,13 +327,15 @@ router.delete('/:id/groups/:gname', requireAdmin, async (req, res) => {
   if (svc.adLinked) return res.status(400).json({ error: 'AD-teenuse gruppe ei saa siit kustutada.' });
 
   const gname = decodeURIComponent(req.params.gname);
-  const newGroups      = (svc.rightsGroups  || []).filter(g => g !== gname);
+  const newGroups       = (svc.rightsGroups  || []).filter(g => g !== gname);
   const newGroupMembers = { ...(svc.groupMembers || {}) };
   delete newGroupMembers[gname];
+  const newGroupIndices = { ...(svc.groupIndices || {}) };
+  delete newGroupIndices[gname];
 
   await db.execute(
-    'UPDATE services SET rights_groups = ?, group_members = ?, updated_at = ? WHERE id = ?',
-    [JSON.stringify(newGroups), JSON.stringify(newGroupMembers), new Date(), req.params.id]
+    'UPDATE services SET rights_groups = ?, group_members = ?, group_indices = ?, updated_at = ? WHERE id = ?',
+    [JSON.stringify(newGroups), JSON.stringify(newGroupMembers), JSON.stringify(newGroupIndices), new Date(), req.params.id]
   );
   audit.logEvent(req.session.user.sam, 'UPDATE_SERVICE', `${svc.name} / kustuta grupp ${gname}`, 'success', svc.code);
   const updated = await getService(req.params.id);

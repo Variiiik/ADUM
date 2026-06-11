@@ -223,15 +223,6 @@ app.get('/api/settings/logo', (req, res) => {
   } catch { res.status(404).end(); }
 });
 
-// Login rate limiting — max 10 attempts per IP per 15 minutes
-const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 10,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Liiga palju sisselogimiskatseid. Proovige 15 minuti pärast uuesti.' },
-});
-
 // Routes
 app.use('/api/auth/login', loginLimiter);
 app.use('/api/auth',     authRouter);

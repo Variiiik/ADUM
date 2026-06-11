@@ -219,7 +219,7 @@ Views.Services = {
         <div style="display:flex;align-items:center;gap:10px;padding:10px 0;cursor:pointer" data-action="toggle-group">
           <div class="grp-ic" style="flex-shrink:0;position:relative">
             ${icon('shield',13)}
-            <span style="position:absolute;bottom:-3px;right:-5px;font-size:9px;font-weight:700;color:var(--ink-2);line-height:1">${idx+1}</span>
+            <span style="position:absolute;bottom:-3px;right:-5px;font-size:9px;font-weight:700;color:var(--ink-2);line-height:1">${svc.groupIndices?.[g.name] ?? idx+1}</span>
           </div>
           <div style="flex:1;min-width:0">
             <div style="font-size:13px;font-weight:500">${esc(g.name)}</div>
