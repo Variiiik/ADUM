@@ -468,7 +468,7 @@ const App = {
               <label>${esc(o.inputLabel)}</label>
               <div class="input-group">
                 <input class="input mono" id="modal-input" type="${o.inputType||'text'}" placeholder="${esc(o.inputPlaceholder||'')}" />
-                ${o.inputBtn ? `<button class="btn" id="modal-input-btn" type="button">${icon('refresh',15)} ${esc(o.inputBtn)}</button>` : ''}
+                ${o.inputBtn ? `<button class="btn" id="modal-input-btn" type="button" title="Juhuslik parool">${icon('refresh',15)} ${esc(o.inputBtn)}</button><button class="btn" id="modal-input-btn-est" type="button" title="Eesti sõnadest parool" style="white-space:nowrap">🇪🇪 Sõnad</button>` : ''}
               </div>
               ${o.inputHint ? `<div id="modal-input-bar"></div><span class="hint" id="modal-input-hint">${esc(o.inputHint)}</span>` : ''}
             </div>
@@ -493,6 +493,10 @@ const App = {
       document.getElementById('modal-input-btn').addEventListener('click', () => {
         const inp = document.getElementById('modal-input');
         if (inp) { inp.value = genPassword(); updatePwBar(inp.value); }
+      });
+      document.getElementById('modal-input-btn-est')?.addEventListener('click', () => {
+        const inp = document.getElementById('modal-input');
+        if (inp) { inp.value = genPasswordEstonian(); updatePwBar(inp.value); }
       });
     }
     if (o.inputType === 'password' || o.inputLabel) {
@@ -530,6 +534,55 @@ function genPassword() {
   return p;
 }
 
+function genPasswordEstonian() {
+  // Pattern: KolmSõnaKoos + 3-4 numbrit + erimärk  (nt "SiniLilledKevad1123#")
+  // Üks sõna võib osaliselt saada e→3, a→4, t→7
+  const words = [
+    'karu','maja','lumi','vesi','tuli','mets','kivi','lind','kala','koer',
+    'kass','leib','piim','mesi','pilv','jarv','magi','rand','lill','tuul',
+    'vihm','roos','hunt','rebane','hirv','orav','kana','aed','tuba','lamp',
+    'hani','part','siil','janes','kobras','ilves','nugis','vaher','lepp','pihla',
+    'suur','vaike','pikk','must','valge','punane','sinine','roheline','uus','vana',
+    'kiire','kuum','kulm','hele','pehme','kova','raske','kerge','ilus','tark',
+    'noor','tugev','aus','selge','soe','lahe','vapper','tragi','ere','hea',
+    'kevad','suvi','sugis','talv','paike','pilved','tuuled','lumest','jooksis','lendas',
+  ];
+
+  const LEET = { e:'3', a:'4', t:'7' };
+
+  function capitalize(w) { return w.charAt(0).toUpperCase() + w.slice(1); }
+
+  function leetify(w) {
+    return w.charAt(0) + w.slice(1).split('').map(c => LEET[c] || c).join('');
+  }
+
+  const arr = new Uint32Array(6);
+  crypto.getRandomValues(arr);
+
+  // 3 distinct words
+  const idx = [arr[0] % words.length, arr[1] % words.length, arr[2] % words.length];
+  if (idx[1] === idx[0]) idx[1] = (idx[1] + 1) % words.length;
+  if (idx[2] === idx[0] || idx[2] === idx[1]) idx[2] = (idx[2] + 2) % words.length;
+  const picked = idx.map(i => words[i]);
+
+  // Leet üks sõna (25% tõenäosusega mitte ühtegi)
+  const leetTarget = arr[3] % 4;
+  if (leetTarget < 3) picked[leetTarget] = leetify(picked[leetTarget]);
+
+  const body = picked.map(capitalize).join('');
+
+  // 3 või 4 numbrit
+  const num = String(arr[4] % 2 === 0
+    ? arr[4] % 900 + 100    // 100–999
+    : arr[4] % 9000 + 1000  // 1000–9999
+  );
+
+  const specials = ['#', '!', '@', '$'];
+  const spec = specials[arr[5] % specials.length];
+
+  return body + num + spec;
+}
+
 // Start the app
 document.addEventListener('DOMContentLoaded', () => App.init());
 
@@ -541,5 +594,6 @@ window.avatar    = avatar;
 window.initials  = initials;
 window.statusBadge = statusBadge;
 window.checkbox  = checkbox;
-window.genPassword = genPassword;
+window.genPassword         = genPassword;
+window.genPasswordEstonian = genPasswordEstonian;
 // Views registry is initialised in api.js (first script to load)

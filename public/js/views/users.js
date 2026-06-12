@@ -239,6 +239,7 @@ Views.Users = {
     // ── Async init: settings, OU tree, domains ──
     let domains      = ['varik.local'];
     let uiSettings   = { usernamePrefix: '1', showManager: true };
+    let mailSettings = { outlookGroup: '', outlookDomain: '', postfixDomain: '' };
     let ouTreeData   = null;
     let smsEnabled   = false;
 
@@ -248,10 +249,11 @@ Views.Users = {
         API.getSettings(),
         API.getOus(),
       ]);
-      domains    = cfgRes.domains || domains;
-      uiSettings = { ...uiSettings, ...(settingsRes.settings?.ui || {}) };
-      smsEnabled = !!(settingsRes.settings?.sms?.enabled);
-      ouTreeData = ousRes.tree || null;
+      domains      = cfgRes.domains || domains;
+      uiSettings   = { ...uiSettings, ...(settingsRes.settings?.ui || {}) };
+      mailSettings = { ...mailSettings, ...(settingsRes.settings?.mail || {}) };
+      smsEnabled   = !!(settingsRes.settings?.sms?.enabled);
+      ouTreeData   = ousRes.tree || null;
     } catch { /* use defaults */ }
 
     const defDomain        = domains[0];
@@ -403,7 +405,8 @@ Views.Users = {
               <div class="input-group">
                 <input class="input mono" id="f-pass" type="text"
                   placeholder="${isEdit?'Jäta tühjaks muutmata jätmiseks':'••••••••••••'}" />
-                <button class="btn" id="f-gen">${icon('refresh',15)} Genereeri</button>
+                <button class="btn" id="f-gen" title="Juhuslik parool">${icon('refresh',15)} Genereeri</button>
+                <button class="btn" id="f-gen-est" title="Eesti sõnadest parool" style="white-space:nowrap">🇪🇪 Sõnad</button>
               </div>
               <div class="pwbar" id="f-pwbar"></div>
               <span class="hint" id="f-pwhint"></span>
@@ -427,6 +430,35 @@ Views.Users = {
                 </label>
               </div>
             </div>` : ''}
+
+            <!-- ══ Meilindus ══ -->
+            <div class="form-sec-title">Meilindus</div>
+            ${!isEdit ? `
+            <div class="field full">
+              <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border:1px solid var(--border);border-radius:9px;background:var(--surface-2)">
+                <div style="flex:1">
+                  <div style="font-weight:600;font-size:13.5px" id="f-mailtype-lbl">Postfix (kohalik meil)</div>
+                  <div class="hint">${mailSettings.outlookGroup
+                    ? `Microsoft 365: kasutaja lisatakse gruppi <code>${esc(mailSettings.outlookGroup)}</code>`
+                    : 'Microsoft 365 grupp on seadistamata — vali Kasutajaliidese seadetes'}</div>
+                </div>
+                <label class="switch">
+                  <input type="checkbox" id="f-mailtype-switch" ${!mailSettings.outlookGroup ? 'disabled' : ''} />
+                  <span class="track"></span>
+                </label>
+              </div>
+              <input type="hidden" id="f-mailtype" value="postfix" />
+            </div>` : `
+            <div class="field full">
+              <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid var(--border);border-radius:9px;background:var(--surface-2)">
+                ${mailSettings.outlookGroup && user?.groups?.includes(mailSettings.outlookGroup)
+                  ? `<span class="badge" style="background:#e1effe;color:#1a56db"><span class="dot" style="background:#1a56db"></span>Microsoft 365 (Outlook)</span>`
+                  : `<span class="badge ok"><span class="dot"></span>Postfix (kohalik meil)</span>`}
+                <span class="hint" style="margin:0">${mailSettings.outlookGroup
+                  ? 'Muutmiseks lisa/eemalda kasutaja grupist <code>' + esc(mailSettings.outlookGroup) + '</code>'
+                  : 'Hübriid meilindus pole seadistatud'}</span>
+              </div>
+            </div>`}
 
             <!-- ══ Organisatsioon ══ -->
             <div class="form-sec-title">Organisatsioon</div>
@@ -545,6 +577,11 @@ Views.Users = {
       document.getElementById('f-pass').value = p;
       document.getElementById('f-pass').dispatchEvent(new Event('input'));
     });
+    document.getElementById('f-gen-est').addEventListener('click', () => {
+      const p = genPasswordEstonian();
+      document.getElementById('f-pass').value = p;
+      document.getElementById('f-pass').dispatchEvent(new Event('input'));
+    });
 
     // ── OU tree interactions ──
     const treeEl = document.getElementById('f-ou-tree');
@@ -638,6 +675,13 @@ Views.Users = {
       }
     }
 
+    // ── Meilinduse switch ──
+    document.getElementById('f-mailtype-switch')?.addEventListener('change', (e) => {
+      const isOutlook = e.target.checked;
+      document.getElementById('f-mailtype').value = isOutlook ? 'outlook' : 'postfix';
+      document.getElementById('f-mailtype-lbl').textContent = isOutlook ? 'Microsoft 365 (Outlook)' : 'Postfix (kohalik meil)';
+    });
+
     // ── Konto olek toggle ──
     document.getElementById('f-enabled').addEventListener('change', (e) => {
       document.getElementById('f-enabled-lbl').textContent = e.target.checked ? 'Konto lubatud' : 'Konto keelatud';
@@ -679,8 +723,9 @@ Views.Users = {
       const docnr   = document.getElementById('f-docnr')?.value.trim() || '';
       const manager = document.getElementById('f-manager')?.value || '';
       const phone   = document.getElementById('f-phone')?.value.trim() || '';
-      const enabled = document.getElementById('f-enabled').checked;
-      const sendSms = !isEdit && !!(document.getElementById('f-sms')?.checked);
+      const enabled  = document.getElementById('f-enabled').checked;
+      const sendSms  = !isEdit && !!(document.getElementById('f-sms')?.checked);
+      const mailType = !isEdit ? (document.getElementById('f-mailtype')?.value || 'postfix') : null;
 
       // Collect selected groups
       const selGroups = [...document.querySelectorAll('[data-group]:checked')]
@@ -762,6 +807,11 @@ Views.Users = {
 
           // Add to extra groups (Haigla-Kõik lisatakse serveris automaatselt)
           const extraGroups = selGroups.filter(g => g !== 'Haigla-Kõik');
+          // If Outlook mail selected, also add to outlook group
+          if (mailType === 'outlook' && mailSettings.outlookGroup &&
+              !extraGroups.includes(mailSettings.outlookGroup)) {
+            extraGroups.push(mailSettings.outlookGroup);
+          }
           await Promise.allSettled(extraGroups.map(g => API.addToGroup(sam, g)));
 
           // Upload photo if selected

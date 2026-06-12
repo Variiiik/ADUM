@@ -36,6 +36,14 @@ const DEFAULTS = {
     usernamePrefix: '1',
     showManager: true,
   },
+  homefolder: {
+    enabled:     false,
+    driveLetter: 'H',
+    path:        '\\\\server\\homes\\%username%',
+  },
+  mail: {
+    outlookGroup: '',
+  },
   ldap: {
     url:       process.env.LDAP_URL      || 'ldap://dc01.haigla.vmh.ee',
     port:      389,
@@ -131,7 +139,7 @@ router.get('/', (req, res) => {
   res.json({ settings: mask(load()) });
 });
 
-const VALID_SECTIONS = ['appearance','ui','ldap','email','sms','templates','roles','services'];
+const VALID_SECTIONS = ['appearance','ui','homefolder','mail','ldap','email','sms','templates','roles','services'];
 
 // PUT /api/settings
 router.put('/', requireAdmin, (req, res) => {
@@ -159,6 +167,10 @@ router.put('/', requireAdmin, (req, res) => {
       settings.sms = { ...settings.sms, ...data };
       if (data.apiKey === MASK)    settings.sms.apiKey    = load().sms?.apiKey    || '';
       if (data.apiSecret === MASK) settings.sms.apiSecret = load().sms?.apiSecret || '';
+    } else if (section === 'homefolder') {
+      settings.homefolder = { ...(settings.homefolder || {}), ...data };
+    } else if (section === 'mail') {
+      settings.mail = { ...(settings.mail || {}), ...data };
     } else if (section === 'roles') {
       settings.roles = { ...(settings.roles || {}), ...data };
     } else if (section === 'services') {

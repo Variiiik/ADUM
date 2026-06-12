@@ -67,6 +67,9 @@ const API = (() => {
     setUserAttr:   (sam, attr, value) => request('/api/users/' + encodeURIComponent(sam) + '/attrs', { method:'PATCH', body: JSON.stringify({ attr, value }) }),
     uploadUserPhoto: (sam, dataUrl) => request('/api/users/' + encodeURIComponent(sam) + '/photo', { method:'POST', body: JSON.stringify({ dataUrl }) }),
     deleteUserPhoto: (sam)          => del('/api/users/' + encodeURIComponent(sam) + '/photo'),
+    getUserMail:     (sam)          => get('/api/users/' + encodeURIComponent(sam) + '/mail'),
+    addUserAlias:    (sam, alias)   => post('/api/users/' + encodeURIComponent(sam) + '/mail/aliases', { alias }),
+    removeUserAlias: (sam, alias)   => del('/api/users/' + encodeURIComponent(sam) + '/mail/aliases/' + encodeURIComponent(alias)),
 
     // Groups
     getGroups: () => get('/api/groups'),

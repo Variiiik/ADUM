@@ -8,6 +8,7 @@ const lc         = require('../config/ldap');
 const audit      = require('../lib/audit');
 const { requireAdmin } = require('../middleware/auth');
 const { createUser } = require('../lib/createUser');
+const db             = require('../lib/db');
 
 // Windows FILETIME (100ns ticks since 1601-01-01) → ISO string, or null if absent/zero
 function winFileTimeToIso(raw) {
@@ -725,6 +726,105 @@ router.delete('/:sam/photo', requireAdmin, async (req, res) => {
   } catch (err) {
     console.error('[users] photo delete:', err.message);
     res.status(500).json({ error: 'Foto kustutamine ebaõnnestus.' });
+  }
+});
+
+// ─── Mail endpoints ───────────────────────────────────────────────────────────
+
+function _loadSettings() {
+  const settingsFile = path.join(__dirname, '..', 'config', 'settings.json');
+  try {
+    if (fs.existsSync(settingsFile)) return JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
+  } catch { /* ignore */ }
+  return {};
+}
+
+// GET /api/users/:sam/mail
+router.get('/:sam/mail', requireAdmin, async (req, res) => {
+  const { sam } = req.params;
+  if (!validateSam(sam)) return res.status(400).json({ error: 'Vigane kasutajanimi.' });
+
+  const settings     = _loadSettings();
+  const outlookGroup = settings.mail?.outlookGroup || '';
+  let mailType = 'postfix';
+
+  try {
+    if (outlookGroup) {
+      if (lc.MOCK_AD) {
+        const u = lc.MOCK_USERS.find(x => x.sam === sam);
+        if (u && u.groups && u.groups.includes(outlookGroup)) mailType = 'outlook';
+      } else {
+        const results = await lc.searchUsers(
+          `(&(objectClass=user)(sAMAccountName=${lc.escapeLdap(sam)}))`,
+          ['memberOf']
+        );
+        if (results.length) {
+          const memberOf = [].concat(results[0].memberOf || results[0].memberof || []);
+          if (memberOf.some(dn => dn.split(',')[0].toLowerCase() === `cn=${outlookGroup.toLowerCase()}`)) {
+            mailType = 'outlook';
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.error('[mail] mailType detection:', e.message);
+  }
+
+  let aliases = [];
+  try {
+    const [rows] = await db.query('SELECT aliases FROM user_mail WHERE sam = ?', [sam]);
+    if (rows.length) aliases = JSON.parse(rows[0].aliases || '[]');
+  } catch (e) {
+    console.error('[mail] aliases load:', e.message);
+  }
+
+  res.json({ mailType, aliases });
+});
+
+// POST /api/users/:sam/mail/aliases — add alias
+router.post('/:sam/mail/aliases', requireAdmin, async (req, res) => {
+  const { sam } = req.params;
+  const actor   = req.session.user.sam;
+  if (!validateSam(sam)) return res.status(400).json({ error: 'Vigane kasutajanimi.' });
+  const { alias } = req.body;
+  if (!alias || typeof alias !== 'string' || !alias.includes('@')) {
+    return res.status(400).json({ error: 'Vigane alias (peab sisaldama @).' });
+  }
+  const a = alias.trim().toLowerCase();
+  try {
+    const [rows] = await db.query('SELECT aliases FROM user_mail WHERE sam = ?', [sam]);
+    let aliases = rows.length ? JSON.parse(rows[0].aliases || '[]') : [];
+    if (aliases.includes(a)) return res.status(409).json({ error: 'Alias on juba olemas.' });
+    aliases.push(a);
+    const aliasJson = JSON.stringify(aliases);
+    await db.query(
+      `INSERT INTO user_mail (sam, aliases) VALUES (?, ?) ON DUPLICATE KEY UPDATE aliases = ?`,
+      [sam, aliasJson, aliasJson]
+    );
+    audit.logEvent(actor, 'MODIFY_USER', sam, 'success', `alias_add=${a}`);
+    res.json({ ok: true, aliases });
+  } catch (err) {
+    console.error('[mail] alias add:', err.message);
+    res.status(500).json({ error: 'Aliase lisamine ebaõnnestus.' });
+  }
+});
+
+// DELETE /api/users/:sam/mail/aliases/:alias — remove alias
+router.delete('/:sam/mail/aliases/:alias', requireAdmin, async (req, res) => {
+  const { sam, alias } = req.params;
+  const actor = req.session.user.sam;
+  if (!validateSam(sam)) return res.status(400).json({ error: 'Vigane kasutajanimi.' });
+  try {
+    const [rows] = await db.query('SELECT aliases FROM user_mail WHERE sam = ?', [sam]);
+    if (!rows.length) return res.json({ ok: true, aliases: [] });
+    let aliases = JSON.parse(rows[0].aliases || '[]');
+    aliases = aliases.filter(a => a !== alias);
+    await db.query('UPDATE user_mail SET aliases = ? WHERE sam = ?', [JSON.stringify(aliases), sam]);
+    audit.logEvent(actor, 'MODIFY_USER', sam, 'success', `alias_remove=${alias}`);
+    res.json({ ok: true, aliases });
+  } catch (err) {
+    console.error('[mail] alias remove:', err.message);
+    res.status(500).json({ error: 'Aliase eemaldamine ebaõnnestus.' });
   }
 });
 

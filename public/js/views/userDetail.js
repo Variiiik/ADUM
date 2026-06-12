@@ -2,31 +2,36 @@
 'use strict';
 
 Views.UserDetail = {
-  _tab:      'general',
-  _user:     null,
-  _groups:   [],
-  _services: [],   // all services (for the services tab picker)
-  _userSvcs: [],   // services the user belongs to
-  _attrs:    null, // raw AD attributes for the attribute editor tab (null = not loaded)
+  _tab:          'general',
+  _user:         null,
+  _groups:       [],
+  _services:     [],
+  _userSvcs:     [],
+  _attrs:        null,
+  _mail:         null,
+  _outlookGroup: '',
 
   async render(container, sam) {
     if (!sam) { App.navigate('users'); return; }
     container.innerHTML = `<div class="content-inner"><div style="text-align:center;padding:60px"><div class="spinner" style="margin:auto"></div></div></div>`;
 
     this._attrs = null;
+    this._mail  = null;
     try {
-      const [userRes, groupsRes, svcsRes, userSvcsRes, auditRes] = await Promise.all([
+      const [userRes, groupsRes, svcsRes, userSvcsRes, auditRes, settingsRes] = await Promise.all([
         API.getUser(sam),
         API.getGroups(),
         API.getServices(),
         API.getUserServices(sam),
         API.getAuditForUser(sam),
+        API.getSettings().catch(() => ({ settings: {} })),
       ]);
       this._user          = userRes.user;
       this._groups        = groupsRes.groups    || [];
       this._services      = svcsRes.services    || [];
       this._userSvcs      = userSvcsRes.services || [];
       this._auditEntries  = auditRes.entries    || [];
+      this._outlookGroup  = settingsRes.settings?.mail?.outlookGroup || '';
     } catch (err) {
       container.innerHTML = `<div class="content-inner"><div class="empty">${icon('alert',40)}<div>${esc(err.message)}</div><button class="btn mt16" id="ud-back">Tagasi nimekirja</button></div></div>`;
       container.getElementById?.('ud-back')?.addEventListener('click', () => App.navigate('users'));
@@ -55,6 +60,7 @@ Views.UserDetail = {
       { id:'groups',     label:'Grupikuuluvused', cnt: u.groups.length },
       { id:'services',   label:'Teenused',        cnt: svcCount || null },
       { id:'account',    label:'Konto seaded',    cnt: null },
+      { id:'email',      label:'Meilindus',       cnt: null },
       { id:'activity',   label:'Tegevuslogi',     cnt: null },
       ...(isAdmin ? [{ id:'attributes', label:'Atribuudid', cnt: null }] : []),
     ];
@@ -117,6 +123,9 @@ Views.UserDetail = {
         <div class="k">Konto lukustatud</div><div class="v">${u.status==='locked'?'<span class="badge warn"><span class="dot"></span>Jah</span>':'Ei'}</div>
       </div>`;
 
+    } else if (tab === 'email') {
+      tabContent = self._renderEmailTab(container);
+
     } else if (tab === 'activity') {
       tabContent = self._renderActivityTab();
 
@@ -139,6 +148,11 @@ Views.UserDetail = {
             ${u.mail ? `<span class="chip">${icon('mail',14)} ${esc(u.mail)}</span>` : ''}
             ${u.telephoneNumber ? `<span class="chip">${icon('phone',14)} ${esc(u.telephoneNumber)}</span>` : ''}
             ${u.employeeID ? `<span class="chip">${icon('id',14)} ${esc(u.employeeID)}</span>` : ''}
+            ${self._outlookGroup
+              ? (u.groups && u.groups.includes(self._outlookGroup)
+                  ? `<span class="chip" style="background:#e1effe;color:#1a56db;border-color:#bfdbfe">${icon('mail',14)} Microsoft 365</span>`
+                  : `<span class="chip" style="background:#dcfce7;color:#16a34a;border-color:#bbf7d0">${icon('mail',14)} Postfix</span>`)
+              : ''}
           </div>
         </div>
         <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
@@ -373,6 +387,17 @@ Views.UserDetail = {
       self._bindServicesTabEvents(container, u, isAdmin);
     }
 
+    // Email tab — lazy load on first open
+    if (tab === 'email' && isAdmin) {
+      if (self._mail === null) {
+        API.getUserMail(u.sam)
+          .then(r => { self._mail = r; self._renderDetail(container); })
+          .catch(err => App.toast('bad', 'Meilindusteabe laadimine ebaõnnestus', err.message));
+      } else {
+        self._bindEmailTabEvents(container, u);
+      }
+    }
+
     // Attributes tab — lazy load on first open
     if (tab === 'attributes' && isAdmin) {
       if (self._attrs === null) {
@@ -383,6 +408,79 @@ Views.UserDetail = {
         self._bindAttrsTabEvents(container, u);
       }
     }
+  },
+
+  // ── Email tab ────────────────────────────────────────────────────────────────
+
+  _renderEmailTab() {
+    if (this._mail === null) {
+      return `<div style="text-align:center;padding:40px"><div class="spinner" style="margin:auto"></div></div>`;
+    }
+    const { mailType, aliases } = this._mail;
+    const isOutlook = mailType === 'outlook';
+    const typeLabel = isOutlook ? 'Microsoft 365 (Outlook)' : 'Postfix (kohalik meil)';
+    const typeBadge = isOutlook
+      ? `<span class="badge" style="background:#e1effe;color:#1a56db"><span class="dot" style="background:#1a56db"></span>${typeLabel}</span>`
+      : `<span class="badge ok"><span class="dot"></span>${typeLabel}</span>`;
+
+    return `
+      <div class="kv" style="margin-bottom:20px">
+        <div class="k">Meilisüsteem</div>
+        <div class="v">${typeBadge}</div>
+      </div>
+
+      <div style="font-weight:600;font-size:13px;margin-bottom:10px">E-posti aliased</div>
+      <div id="ud-alias-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px">
+        ${aliases.length === 0
+          ? `<div class="muted" style="font-size:13px;padding:8px 0">Ühtegi aliast pole lisatud.</div>`
+          : aliases.map(a => `
+              <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border:1px solid var(--border);border-radius:7px;background:var(--surface-2)">
+                <span class="mono" style="flex:1;font-size:13px">${esc(a)}</span>
+                <button class="icon-act danger" data-rm-alias="${esc(a)}" title="Eemalda alias">${icon('x',14)}</button>
+              </div>`).join('')}
+      </div>
+
+      <div style="display:flex;gap:8px;align-items:flex-end">
+        <div class="field" style="flex:1;margin:0">
+          <input class="input mono" id="ud-alias-input" placeholder="alias@domeen.ee" style="font-size:13px" />
+        </div>
+        <button class="btn primary sm" id="ud-alias-add">${icon('plus',14)} Lisa alias</button>
+      </div>`;
+  },
+
+  _bindEmailTabEvents(container, u) {
+    const self = this;
+
+    container.querySelectorAll('[data-rm-alias]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const alias = btn.dataset.rmAlias;
+        try {
+          const r = await API.removeUserAlias(u.sam, alias);
+          self._mail.aliases = r.aliases;
+          self._renderDetail(container);
+          App.toast('ok', 'Alias eemaldatud', alias);
+        } catch (err) { App.toast('bad', 'Viga', err.message); }
+      });
+    });
+
+    document.getElementById('ud-alias-add')?.addEventListener('click', async () => {
+      const inp = document.getElementById('ud-alias-input');
+      const alias = inp?.value.trim();
+      if (!alias || !alias.includes('@')) {
+        App.toast('warn', 'Vigane alias', 'Alias peab sisaldama @-märki.');
+        return;
+      }
+      try {
+        const r = await API.addUserAlias(u.sam, alias);
+        self._mail.aliases = r.aliases;
+        self._renderDetail(container);
+        App.toast('ok', 'Alias lisatud', alias);
+      } catch (err) { App.toast('bad', 'Viga', err.message); }
+    });
+
+    document.getElementById('ud-alias-input')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') document.getElementById('ud-alias-add')?.click();
+    });
   },
 
   // ── Activity tab ─────────────────────────────────────────────────────────────

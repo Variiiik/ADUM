@@ -204,6 +204,40 @@ Views.Settings = {
                 </label>
               </div>
             </div>
+
+            <div class="form-sec-title" style="margin-top:8px">Kodukaust (Homefolder)</div>
+            <div class="field full">
+              <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border:1px solid var(--border);border-radius:9px;background:var(--surface-2);margin-bottom:12px">
+                <div style="flex:1">
+                  <div style="font-weight:600;font-size:13.5px">Kodukaust lubatud</div>
+                  <div class="hint">Kaardi/kausta seadistamine uue kasutaja loomisel</div>
+                </div>
+                <label class="switch">
+                  <input type="checkbox" id="su-hf-enabled" ${(s.homefolder||{}).enabled?'checked':''} />
+                  <span class="track"></span>
+                </label>
+              </div>
+              <div style="display:flex;gap:10px;align-items:flex-start">
+                <div style="flex:0 0 80px">
+                  <label style="font-size:12px;font-weight:500;display:block;margin-bottom:4px">Ketta tähis</label>
+                  <input class="input mono" id="su-hf-drive" value="${esc((s.homefolder||{}).driveLetter||'H')}"
+                    placeholder="H" maxlength="1" style="text-transform:uppercase" />
+                </div>
+                <div style="flex:1">
+                  <label style="font-size:12px;font-weight:500;display:block;margin-bottom:4px">Serveri tee</label>
+                  <input class="input mono" id="su-hf-path" value="${esc((s.homefolder||{}).path||'\\\\\\\\server\\\\homes\\\\%username%')}"
+                    placeholder="\\\\\\\\server\\\\homes\\\\%username%" />
+                  <span class="hint">Kasutage <code>%username%</code> kasutajanime jaoks</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="form-sec-title" style="margin-top:8px">Hübriid meilindus</div>
+            <div class="field full">
+              <label>Outlooki AD grupp</label>
+              <input class="input mono" id="su-outlookgroup" value="${esc((s.mail||{}).outlookGroup||'')}" placeholder="Microsoft365-Users" autocomplete="off" />
+              <span class="hint">Selles grupis olevad kasutajad kasutavad Microsoft 365 meilindust. Tühi = kõik kasutavad Postfixi.</span>
+            </div>
           </div>
           <div style="display:flex;justify-content:flex-end;margin-top:20px">
             <button type="submit" class="btn primary">${icon('check',16)} Salvesta kasutajaliidese seaded</button>
@@ -874,8 +908,15 @@ Views.Settings = {
           showManager:    document.getElementById('su-manager').checked,
         };
         await self._save('ui', data, container);
+        const hfEnabled = document.getElementById('su-hf-enabled')?.checked ?? false;
+        const hfDrive   = (document.getElementById('su-hf-drive')?.value || 'H').toUpperCase().slice(0,1);
+        const hfPath    = document.getElementById('su-hf-path')?.value || '\\\\server\\homes\\%username%';
+        await self._save('homefolder', { enabled: hfEnabled, driveLetter: hfDrive, path: hfPath }, container);
+        const outlookGroup = document.getElementById('su-outlookgroup')?.value.trim() || '';
+        await self._save('mail', { outlookGroup }, container);
       });
     }
+
 
     // ── Services form ──
     document.getElementById('st-svc-form')?.addEventListener('submit', async (e) => {
