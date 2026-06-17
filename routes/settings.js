@@ -108,13 +108,28 @@ const DEFAULTS = {
   },
 };
 
+function deepMerge(defaults, overrides) {
+  const result = { ...defaults };
+  for (const key of Object.keys(overrides)) {
+    const val = overrides[key];
+    if (val !== null && val !== undefined && typeof val === 'object' && !Array.isArray(val)) {
+      result[key] = deepMerge(result[key] || {}, val);
+    } else if (val !== null && val !== undefined && val !== '') {
+      result[key] = val;
+    }
+  }
+  return result;
+}
+
 function load() {
+  const base = JSON.parse(JSON.stringify(DEFAULTS));
   try {
     if (fs.existsSync(SETTINGS_FILE)) {
-      return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+      const file = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+      return deepMerge(base, file);
     }
   } catch { /* fall through */ }
-  return JSON.parse(JSON.stringify(DEFAULTS));
+  return base;
 }
 
 function save(settings) {
