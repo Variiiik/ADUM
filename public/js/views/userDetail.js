@@ -466,8 +466,8 @@ Views.UserDetail = {
     document.getElementById('ud-alias-add')?.addEventListener('click', async () => {
       const inp = document.getElementById('ud-alias-input');
       const alias = inp?.value.trim();
-      if (!alias || !alias.includes('@')) {
-        App.toast('warn', 'Vigane alias', 'Alias peab sisaldama @-märki.');
+      if (!alias || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(alias)) {
+        App.toast('warn', 'Vigane alias', 'Sisesta korrektne e-posti aadress (nt alias@domeen.ee).');
         return;
       }
       try {

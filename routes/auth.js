@@ -78,7 +78,7 @@ router.post('/login', async (req, res) => {
       ? { sam: 'k.admin', displayName: 'Klaus Admin', isAdmin: true }
       : userIsHR
       ? { sam: mockUser.sam, displayName: mockUser.displayName, isHR: true }
-      : { sam: mockUser.sam, displayName: mockUser.displayName, isAdmin: true };
+      : { sam: mockUser.sam, displayName: mockUser.displayName };
 
     req.session.regenerate((err) => {
       if (err) return res.status(500).json({ error: 'Sessiooni viga.' });
@@ -171,21 +171,10 @@ router.post('/login', async (req, res) => {
       audit.logEvent(safeName, 'LOGIN', safeName, 'failure',
         'Kasutaja info päring ebaõnnestus: ' + lookupErr.message);
 
-      if (process.env.LDAP_ADMIN_GROUP) {
-        return res.status(403).json({
-          error: DEBUG
-            ? `Grupikontroll ebaõnnestus: ${lookupErr.message}`
-            : 'Ligipääsu kontroll ebaõnnestus. Võtke ühendust administraatoriga.',
-        });
-      }
-      // No group restriction — allow
-      const user = { sam: safeName, displayName: safeName, isAdmin: true };
-      req.session.regenerate((sErr) => {
-        if (sErr) return res.status(500).json({ error: 'Sessiooni viga.' });
-        req.session.user = user;
-        req.session.csrfToken = crypto.randomBytes(32).toString('hex');
-        audit.logEvent(safeName, 'LOGIN', safeName, 'success');
-        res.json({ user, csrfToken: req.session.csrfToken });
+      return res.status(503).json({
+        error: DEBUG
+          ? `Kasutaja info päring ebaõnnestus: ${lookupErr.message}`
+          : 'Ligipääsu kontroll ebaõnnestus. Võtke ühendust administraatoriga.',
       });
     });
   });

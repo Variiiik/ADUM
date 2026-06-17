@@ -940,9 +940,11 @@ Views.Services = {
         <table><thead><tr><th>#</th><th>Teenus</th><th>Kood</th><th>Grupp</th></tr></thead>
         <tbody>${rows}</tbody></table></body></html>`;
       const w = window.open('', '_blank', 'width=700,height=600');
+      w.document.open();
       w.document.write(html);
       w.document.close();
       w.print();
+      w.close();
     });
   },
 };

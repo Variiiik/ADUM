@@ -179,6 +179,10 @@ router.get('/group-index-table', requireAdmin, async (req, res) => {
 // GET /api/services/user/:sam — services where a user has any role
 // (must be before /:id routes so "user" isn't matched as an id)
 router.get('/user/:sam', async (req, res) => {
+  const { isAdmin, sam: actorSam } = req.session.user;
+  if (!isAdmin && req.params.sam !== actorSam) {
+    return res.status(403).json({ error: 'Ligipääs keelatud.' });
+  }
   try {
     const sam      = req.params.sam;
     const services = await listServices();
@@ -303,7 +307,19 @@ router.put('/:id', requireAdmin, async (req, res) => {
   ]);
   const syncErrors = await _syncUsers(updated, [...affected]);
 
-  audit.logEvent(req.session.user.sam, 'UPDATE_SERVICE', updated.name, 'success', updated.code);
+  const changedFields = [];
+  if (name !== undefined && name !== svc.name)                         changedFields.push('name');
+  if (description !== undefined && description !== svc.description)    changedFields.push('description');
+  if (code !== undefined && normalizeCode(code) !== svc.code)          changedFields.push('code');
+  if (adLinked !== undefined)                                           changedFields.push('adLinked');
+  if (owners !== undefined)                                             changedFields.push('owners');
+  if (technicalPerson !== undefined)                                    changedFields.push('technicalPerson');
+  if (members !== undefined)                                            changedFields.push('members');
+  if (rightsGroups !== undefined)                                       changedFields.push('rightsGroups');
+  const auditDetail = changedFields.length
+    ? `Muudetud: ${changedFields.join(', ')} [${updated.code}]`
+    : updated.code;
+  audit.logEvent(req.session.user.sam, 'UPDATE_SERVICE', updated.name, 'success', auditDetail);
   const [enriched] = await enrichServices([updated]);
   res.json({ service: enriched, ...(syncErrors.length ? { syncWarnings: syncErrors } : {}) });
 });
