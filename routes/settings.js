@@ -23,7 +23,7 @@ const DEFAULTS = {
   },
   appearance: {
     systemName:  'AD Kasutajahaldus',
-    orgName:     'Viljandi Haigla',
+    orgName:     '',
     accentColor: '#b02a37',
     navyColor:   '#5e1d27',
     navyColor2:  '#4a141d',
@@ -45,10 +45,10 @@ const DEFAULTS = {
     outlookGroup: '',
   },
   ldap: {
-    url:       process.env.LDAP_URL      || 'ldap://dc01.haigla.vmh.ee',
+    url:       process.env.LDAP_URL      || '',
     port:      389,
     tls:       false,
-    baseDN:    process.env.LDAP_BASE_DN  || 'DC=haigla,DC=vmh,DC=ee',
+    baseDN:    process.env.LDAP_BASE_DN  || '',
     bindDN:    process.env.LDAP_BIND_DN  || '',
     bindPass:  '',
     usersOU:   process.env.LDAP_USERS_OU || '',

@@ -106,7 +106,7 @@ Views.UserDetail = {
               <div class="nm">${esc(g.name)}</div>
               <div class="ds">${esc(g.desc)} · ${esc(g.type)}</div>
             </div>
-            ${isAdmin && gname!=='Haigla-Kõik' ? `<button class="icon-act danger" title="Eemalda grupist" data-rm-group="${esc(gname)}">${icon('x',16)}</button>` : ''}
+            ${isAdmin ? `<button class="icon-act danger" title="Eemalda grupist" data-rm-group="${esc(gname)}">${icon('x',16)}</button>` : ''}
           </div>`;
         }).join('')}`;
 

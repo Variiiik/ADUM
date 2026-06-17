@@ -220,7 +220,7 @@ const App = {
   renderLogin() {
     const a       = this.state.appearance || {};
     const sysName = a.systemName || 'AD Kasutajahaldus';
-    const orgName = a.orgName    || 'Viljandi Haigla';
+    const orgName = a.orgName    || '';
     const logoHtml = a.logoEnabled
       ? `<img src="/api/settings/logo?v=${a.logoVersion||0}" alt="${esc(sysName)}" class="login-logo-img" />`
       : `<div class="login-logo">${icon('shield',22)}</div>`;
@@ -283,7 +283,7 @@ const App = {
   renderSidebar() {
     const a       = this.state.appearance || {};
     const sysName = a.systemName || 'AD Kasutajahaldus';
-    const orgName = a.orgName    || 'Viljandi Haigla';
+    const orgName = a.orgName    || '';
     const isAdmin = !!(this.state.user?.isAdmin);
     const isHR    = !!(this.state.user?.isHR);
     const pending = this.state.pendingRequests || 0;

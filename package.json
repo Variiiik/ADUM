@@ -1,7 +1,7 @@
 {
-  "name": "ad-usermanager",
+  "name": "sentinel",
   "version": "1.0.0",
-  "description": "Active Directory User Management — Viljandi Haigla",
+  "description": "Active Directory User Management",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
