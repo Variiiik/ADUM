@@ -50,8 +50,11 @@ router.post('/login', async (req, res) => {
       if (err) return res.status(500).json({ error: 'Sessiooni viga.' });
       req.session.user = user;
       req.session.csrfToken = crypto.randomBytes(32).toString('hex');
-      audit.logEvent(safeName, 'LOGIN', safeName, 'success', 'Local admin');
-      res.json({ user, csrfToken: req.session.csrfToken });
+      req.session.save((saveErr) => {
+        if (saveErr) return res.status(500).json({ error: 'Sessiooni salvestamine ebaõnnestus.' });
+        audit.logEvent(safeName, 'LOGIN', safeName, 'success', 'Local admin');
+        res.json({ user, csrfToken: req.session.csrfToken });
+      });
     });
     return;
   }
@@ -84,8 +87,11 @@ router.post('/login', async (req, res) => {
       if (err) return res.status(500).json({ error: 'Sessiooni viga.' });
       req.session.user = user;
       req.session.csrfToken = crypto.randomBytes(32).toString('hex');
-      audit.logEvent(user.sam, 'LOGIN', user.sam, 'success', 'Mock mode');
-      res.json({ user, csrfToken: req.session.csrfToken });
+      req.session.save((saveErr) => {
+        if (saveErr) return res.status(500).json({ error: 'Sessiooni salvestamine ebaõnnestus.' });
+        audit.logEvent(user.sam, 'LOGIN', user.sam, 'success', 'Mock mode');
+        res.json({ user, csrfToken: req.session.csrfToken });
+      });
     });
     return;
   }
@@ -162,8 +168,11 @@ router.post('/login', async (req, res) => {
         if (sErr) return res.status(500).json({ error: 'Sessiooni viga.' });
         req.session.user = user;
         req.session.csrfToken = crypto.randomBytes(32).toString('hex');
-        audit.logEvent(safeName, 'LOGIN', safeName, 'success', adminGroup || '');
-        res.json({ user, csrfToken: req.session.csrfToken });
+        req.session.save((saveErr) => {
+          if (saveErr) return res.status(500).json({ error: 'Sessiooni salvestamine ebaõnnestus.' });
+          audit.logEvent(safeName, 'LOGIN', safeName, 'success', adminGroup || '');
+          res.json({ user, csrfToken: req.session.csrfToken });
+        });
       });
 
     }).catch((lookupErr) => {
