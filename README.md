@@ -10,18 +10,36 @@ Mõeldud haigla IT- ja personaliosakonnale — võimaldab hallata AD kontosid il
 ### Kasutajate haldus
 | Funktsioon | Kirjeldus |
 |---|---|
-| Loomine | Eesnimi, perekonnanimi, kasutajanimi, e-post, osakond, ametinimetus, juht, telefon, **dokumendi NR / ringkäigu lehe NR**, OU valik |
+| Loomine | Eesnimi, perekonnanimi, kasutajanimi, e-post, osakond, ametinimetus, juht, telefon, dokumendi NR / ringkäigu lehe NR, OU valik, meilisüsteemi valik |
 | Muutmine | Kõik andmeväljad, grupikuuluvused |
-| Kustutamine | Koos **ringkäigu kontrollnimekirjaga** — näitab kohalikud teenused ja nõuab linnukesi enne kustutamist |
+| Kustutamine | Koos ringkäigu kontrollnimekirjaga — näitab kohalikud teenused ja nõuab linnukesi enne kustutamist |
 | Otsimine | Nimi, kasutajanimi, e-post, osakond, olek |
 | Konto toimingud | Luba/keela (koos kohalike teenuste kontrolliga), ava lukk, lähtesta parool |
+| Parooligeneraator | Eesti sõnadest koosnev fraas (`SõnaSõnaSõna123#`), klassikaline juhuslik parool |
+| Profiilipilt | Üleslaadimine ja kustutamine |
 | SMS | Uue konto ja parooli vahetamise teavitused (Twilio) |
+
+### Meilihaldus
+| Funktsioon | Kirjeldus |
+|---|---|
+| Hübriid meilindus | Kasutaja kuuluvus AD gruppi määrab meilisüsteemi (Microsoft 365 või Postfix) |
+| Meilisüsteemi badge | Kasutaja detailvaates näidatakse selgelt kumb süsteem on aktiivsed |
+| E-posti aliased | Kasutajale saab lisada/eemaldada täiendavaid e-posti aadresse (andmebaasis) |
+| Automaatne grupp | Uue kasutaja loomisel Outlook-valikuga lisatakse automaatselt outlookGroup gruppi |
+
+### Kodukataloog (Homefolder)
+| Funktsioon | Kirjeldus |
+|---|---|
+| Seadistatav | Draivitäht ja UNC tee `%username%` asendusega |
+| Seadistus | Administraatori seadetes lubatav/keelatav |
 
 ### Teenuste õiguste haldus
 | Funktsioon | Kirjeldus |
 |---|---|
 | Teenused | AD-ga lingitud (grupiliikmelisus) ja kohalikud (manuaalsed) teenused |
-| Õiguste grupid | Iga teenuse all nummereeritud grupid, liikmed näevad AD atribuudis oma rolli |
+| Õiguste grupid | Iga teenuse all nummerdatud grupid koos globaalse indeksiga |
+| Globaalne indekseerimine | Kõik grupid üle kõigi teenuste saavad unikaalse indeksi — kasulik AD `extensionAttribute1` väärtuste tõlgendamiseks |
+| Indeksitabel | Eksporditav CSV/prinditav referentsstabel: indeks → teenus → grupp |
 | AD atribuut | Koodformaadis rollid: `RAP:OT` (omanik + tehniline), `ERP:1L` (1. grupi liige) |
 | Sünkroonimine | Lisa/eemalda liige → AD atribuut uuendatakse automaatselt |
 
@@ -82,7 +100,7 @@ Kopeeri `.env.example` → `.env` ja täida väljad. Kommentaarid on `.env.examp
 |---|---|---|
 | `SESSION_SECRET` | *(48-baidi hex)* | `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"` |
 | `DB_HOST` / `DB_USER` / `DB_PASS` | `localhost` / `adum` / `…` | MariaDB ühendus |
-| `LDAP_URL` | `ldaps://dc01.haigla.vmh.ee:636` | LDAPS soovitatav |
+| `LDAP_URL` | `ldaps://dc01.haigla.ee:636` | LDAPS soovitatav |
 | `LDAP_BIND_DN` | `CN=svc-admanager,OU=…` | Teenuskonto täis-DN |
 | `LDAP_ADMIN_GROUP` | `ADUM-Admins` | AD grupp administraatoritele |
 | `LDAP_HR_GROUP` | `ADUM-HR` | AD grupp HR kasutajatele |
@@ -111,8 +129,8 @@ pm2 start ecosystem.config.js --env production
 ```powershell
 New-ADUser -Name "svc-admanager" `
   -SamAccountName "svc-admanager" `
-  -UserPrincipalName "svc-admanager@haigla.vmh.ee" `
-  -Path "OU=Service Accounts,DC=haigla,DC=vmh,DC=ee" `
+  -UserPrincipalName "svc-admanager@haigla.ee" `
+  -Path "OU=Service Accounts,DC=haigla,DC=ee" `
   -AccountPassword (ConvertTo-SecureString "TugEvParool123!" -AsPlainText -Force) `
   -PasswordNeverExpires $true -Enabled $true
 ```
@@ -120,9 +138,9 @@ New-ADUser -Name "svc-admanager" `
 ### Vajalikud õigused
 
 ```powershell
-$svc      = "CN=svc-admanager,OU=Service Accounts,DC=haigla,DC=vmh,DC=ee"
-$usersOU  = "OU=Kasutajad,DC=haigla,DC=vmh,DC=ee"
-$groupsOU = "OU=Grupid,DC=haigla,DC=vmh,DC=ee"
+$svc      = "CN=svc-admanager,OU=Service Accounts,DC=haigla,DC=ee"
+$usersOU  = "OU=Kasutajad,DC=haigla,,DC=ee"
+$groupsOU = "OU=Grupid,DC=haigla,,DC=ee"
 
 dsacls $usersOU /G "${svc}:GR"                      # Lugemine
 dsacls $usersOU /G "${svc}:CCDC;user"               # Loo/kustuta kasutajad
@@ -136,16 +154,16 @@ dsacls $groupsOU /G "${svc}:WP;member;group"        # Muuda grupiliikmeid
 ```powershell
 Install-WindowsFeature AD-Certificate -IncludeManagementTools
 Restart-Computer
-Test-NetConnection -ComputerName dc01.haigla.vmh.ee -Port 636
+Test-NetConnection -ComputerName dc01.haigla.ee -Port 636
 ```
 
 ### Rakenduse AD grupid
 
 ```powershell
 New-ADGroup -Name "ADUM-Admins" -GroupScope Global -GroupCategory Security `
-  -Path "OU=Grupid,DC=haigla,DC=vmh,DC=ee"
+  -Path "OU=Grupid,DC=haigla,DC=ee"
 New-ADGroup -Name "ADUM-HR" -GroupScope Global -GroupCategory Security `
-  -Path "OU=Grupid,DC=haigla,DC=vmh,DC=ee"
+  -Path "OU=Grupid,DC=haigla,DC=ee"
 
 Add-ADGroupMember -Identity "ADUM-Admins" -Members "mari.tamm"
 Add-ADGroupMember -Identity "ADUM-HR"     -Members "jaan.kask"
@@ -172,7 +190,7 @@ ad-usermanager/
 │   └── auth.js             # requireAuth, requireAdmin, requireHROrAdmin
 ├── routes/
 │   ├── auth.js             # /api/auth/*
-│   ├── users.js            # /api/users/*
+│   ├── users.js            # /api/users/* (sh meilihaldus)
 │   ├── groups.js           # /api/groups
 │   ├── services.js         # /api/services/*
 │   ├── requests.js         # /api/requests/*
@@ -182,7 +200,7 @@ ad-usermanager/
     ├── css/app.css
     └── js/
         ├── api.js          # Fetch-wrapper, CSRF tokenid
-        ├── app.js          # Router, login, sidebar, toasts
+        ├── app.js          # Router, login, sidebar, toasts, parooligeneraatorid
         └── views/
             ├── dashboard.js
             ├── users.js
@@ -208,11 +226,17 @@ ad-usermanager/
 | POST | `/api/users/:sam/enable` | Luba konto |
 | POST | `/api/users/:sam/disable` | Keela konto |
 | POST | `/api/users/:sam/unlock` | Ava lukk |
+| GET | `/api/users/:sam/mail` | Kasutaja meiliteave ja aliased |
+| POST | `/api/users/:sam/mail/aliases` | Lisa e-posti alias |
+| DELETE | `/api/users/:sam/mail/aliases/:alias` | Eemalda alias |
 | GET | `/api/services` | Teenuste nimekiri |
 | GET | `/api/services/user/:sam` | Kasutaja teenused ja rollid |
+| GET | `/api/services/group-index-table` | Globaalne grupiindeksite tabel |
 | POST | `/api/services` | Loo teenus |
 | PUT | `/api/services/:id` | Muuda teenust |
 | DELETE | `/api/services/:id` | Kustuta teenus |
+| POST | `/api/services/:id/groups` | Lisa grupp kohalikule teenusele |
+| DELETE | `/api/services/:id/groups/:gname` | Kustuta grupp |
 | GET | `/api/requests` | Taotluste nimekiri |
 | POST | `/api/requests` | Esita taotlus |
 | POST | `/api/requests/:id/approve` | Kinnita (admin) |

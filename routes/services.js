@@ -156,6 +156,26 @@ async function _syncUsers(svc, sams) {
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 
+// GET /api/services/group-index-table — global reference table of all groups with their indices
+router.get('/group-index-table', requireAdmin, async (req, res) => {
+  const [rows] = await db.query(
+    'SELECT id, name, code, rights_groups, group_indices FROM services ORDER BY name'
+  );
+  const table = [];
+  for (const row of rows) {
+    const groups  = typeof row.rights_groups === 'string' ? JSON.parse(row.rights_groups) : (row.rights_groups || []);
+    const indices = typeof row.group_indices  === 'string' ? JSON.parse(row.group_indices)  : (row.group_indices  || {});
+    for (const gname of groups) {
+      const idx = indices[gname];
+      if (idx != null) {
+        table.push({ index: idx, service: row.name, code: row.code || '', group: gname });
+      }
+    }
+  }
+  table.sort((a, b) => a.index - b.index);
+  res.json({ table });
+});
+
 // GET /api/services/user/:sam — services where a user has any role
 // (must be before /:id routes so "user" isn't matched as an id)
 router.get('/user/:sam', async (req, res) => {
@@ -245,7 +265,30 @@ router.put('/:id', requireAdmin, async (req, res) => {
   if (owners !== undefined && Array.isArray(owners))         { sets.push('owners = ?');        vals.push(JSON.stringify(owners)); }
   if (technicalPerson !== undefined) { sets.push('technical_person = ?'); vals.push(technicalPerson || null); }
   if (members !== undefined && Array.isArray(members))       { sets.push('members = ?');       vals.push(JSON.stringify(members)); }
-  if (rightsGroups !== undefined && Array.isArray(rightsGroups)) { sets.push('rights_groups = ?'); vals.push(JSON.stringify(rightsGroups)); }
+  if (rightsGroups !== undefined && Array.isArray(rightsGroups)) {
+    sets.push('rights_groups = ?');
+    vals.push(JSON.stringify(rightsGroups));
+
+    // Assign global indices to any newly added groups
+    const existing = svc.groupIndices || {};
+    const newGroups = rightsGroups.filter(g => existing[g] == null);
+    const removedGroups = Object.keys(existing).filter(g => !rightsGroups.includes(g));
+    if (newGroups.length > 0 || removedGroups.length > 0) {
+      const updatedIndices = { ...existing };
+      for (const g of removedGroups) { delete updatedIndices[g]; }
+      if (newGroups.length > 0) {
+        const [allSvcRows] = await db.query('SELECT group_indices FROM services');
+        const globalIdxs = allSvcRows.flatMap(r => {
+          const gi = typeof r.group_indices === 'string' ? JSON.parse(r.group_indices) : (r.group_indices || {});
+          return Object.values(gi).filter(Number.isInteger);
+        });
+        let nextIdx = globalIdxs.length > 0 ? Math.max(...globalIdxs) + 1 : 1;
+        for (const g of newGroups) { updatedIndices[g] = nextIdx++; }
+      }
+      sets.push('group_indices = ?');
+      vals.push(JSON.stringify(updatedIndices));
+    }
+  }
 
   vals.push(req.params.id);
   await db.execute(`UPDATE services SET ${sets.join(', ')} WHERE id = ?`, vals);
@@ -306,8 +349,14 @@ router.post('/:id/groups', requireAdmin, async (req, res) => {
 
   const newGroups       = [...(svc.rightsGroups  || []), gname];
   const newGroupMembers = { ...(svc.groupMembers || {}), [gname]: [] };
-  const existingIdxs    = Object.values(svc.groupIndices || {});
-  const nextIdx         = existingIdxs.length > 0 ? Math.max(...existingIdxs) + 1 : 1;
+
+  // Global index: find max across ALL services so indices are unique system-wide
+  const [allSvcRows] = await db.query('SELECT group_indices FROM services');
+  const globalIdxs   = allSvcRows.flatMap(r => {
+    const gi = typeof r.group_indices === 'string' ? JSON.parse(r.group_indices) : (r.group_indices || {});
+    return Object.values(gi).filter(Number.isInteger);
+  });
+  const nextIdx         = globalIdxs.length > 0 ? Math.max(...globalIdxs) + 1 : 1;
   const newGroupIndices = { ...(svc.groupIndices || {}), [gname]: nextIdx };
 
   await db.execute(

@@ -100,6 +100,7 @@ const API = (() => {
     createService:            (data)          => post('/api/services', data),
     updateService:            (id, data)      => put('/api/services/' + id, data),
     deleteService:            (id)            => del('/api/services/' + id),
+    getGroupIndexTable:       ()              => get('/api/services/group-index-table'),
     getServiceGroupMembers:   (id, gname)     => get('/api/services/' + id + '/groups/' + encodeURIComponent(gname) + '/members'),
     createServiceGroup:       (id, data)      => post('/api/services/' + id + '/groups', data),
     deleteServiceGroup:       (id, gname)     => del('/api/services/' + id + '/groups/' + encodeURIComponent(gname)),

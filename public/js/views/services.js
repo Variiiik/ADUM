@@ -52,6 +52,7 @@ Views.Services = {
               <input id="svc-search" class="input" style="padding-left:30px;height:32px;font-size:13px" placeholder="Otsi teenust…" value="${esc(this._q)}" autocomplete="off" />
             </div>
             ${isAdmin ? `<button class="btn primary" id="svc-new-btn" style="height:32px;font-size:12px;gap:5px">${icon('plus',13)} Uus teenus</button>` : ''}
+            <button class="btn" id="svc-idx-table-btn" style="height:32px;font-size:12px;gap:5px" title="Grupiindeksite referentsstabel">${icon('id',13)} Indeksid</button>
           </div>
           <div id="svc-list" style="flex:1;overflow-y:auto;padding:6px">
             ${filtered.length === 0
@@ -93,6 +94,7 @@ Views.Services = {
     });
     document.getElementById('svc-new-btn')?.addEventListener('click', () => this._openNewForm(container));
     document.getElementById('svc-empty-new')?.addEventListener('click', () => this._openNewForm(container));
+    document.getElementById('svc-idx-table-btn')?.addEventListener('click', () => this._openIndexTable());
 
     container.querySelectorAll('.svc-item').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -127,7 +129,6 @@ Views.Services = {
             ${adBadge}
           </div>
           <div style="font-size:13px;color:var(--ink-3)">${esc(svc.description) || '<em>Kirjeldus puudub</em>'}</div>
-          ${svc.adLinked ? `<div style="font-size:11px;color:var(--ink-3);margin-top:4px">AD atribuut: <span class="mono">${esc(this._adAttribute)}</span></div>` : ''}
         </div>
         ${isAdmin ? `
           <button class="btn" id="svc-edit-btn" style="font-size:12px;height:30px">${icon('edit',13)} Muuda</button>
@@ -626,7 +627,6 @@ Views.Services = {
           <div class="field" style="margin-bottom:12px">
             <label>Lühikood <span style="color:var(--bad)">*</span></label>
             <input class="input mono" id="svc-edit-code" type="text" value="${esc(svc.code||'')}" autocomplete="off" maxlength="20" style="text-transform:uppercase;letter-spacing:.5px" />
-            ${svc.adLinked ? `<div style="font-size:11px;color:var(--ink-3);margin-top:4px">Koodi muutmisel uuendatakse kõigi seotud kasutajate AD atribuut <span class="mono">${esc(this._adAttribute)}</span>.</div>` : ''}
           </div>
           <div class="field" style="margin-bottom:12px">
             <label>Kirjeldus</label>
@@ -850,5 +850,99 @@ Views.Services = {
 
     document.getElementById('gpick-q')?.addEventListener('input', e => render(e.target.value.toLowerCase()));
     setTimeout(() => document.getElementById('gpick-manual')?.focus(), 50);
+  },
+
+  async _openIndexTable() {
+    const ovl = document.getElementById('overlay');
+    ovl.innerHTML = `
+      <div class="scrim" id="idxtbl-scrim"></div>
+      <div class="modal" role="dialog" aria-modal="true" style="max-width:680px;width:95vw">
+        <div class="modal-body">
+          <div class="modal-ic" style="background:var(--accent-weak);color:var(--accent)">${icon('id',24)}</div>
+          <h3>Grupiindeksite tabel</h3>
+          <div id="idxtbl-content" style="max-height:420px;overflow-y:auto">
+            <div style="text-align:center;padding:30px"><div class="spinner" style="margin:auto"></div></div>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn" id="idxtbl-csv">${icon('download',13)} CSV</button>
+          <button class="btn" id="idxtbl-print">${icon('printer',13)} Prindi</button>
+          <button class="btn" id="idxtbl-close">Sulge</button>
+        </div>
+      </div>`;
+
+    const close = () => { ovl.innerHTML = ''; };
+    document.getElementById('idxtbl-scrim').addEventListener('click', close);
+    document.getElementById('idxtbl-close').addEventListener('click', close);
+
+    let tableData = [];
+
+    const renderTable = (rows) => {
+      const content = document.getElementById('idxtbl-content');
+      if (!content) return;
+      if (!rows.length) {
+        content.innerHTML = `<div style="padding:20px;text-align:center;font-size:13px;color:var(--ink-3)">Ühtegi gruppi ei leitud</div>`;
+        return;
+      }
+      content.innerHTML = `
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead>
+            <tr style="border-bottom:2px solid var(--border);text-align:left">
+              <th style="padding:7px 10px;color:var(--ink-2);font-weight:600;width:60px">#</th>
+              <th style="padding:7px 10px;color:var(--ink-2);font-weight:600">Teenus</th>
+              <th style="padding:7px 10px;color:var(--ink-2);font-weight:600;width:80px">Kood</th>
+              <th style="padding:7px 10px;color:var(--ink-2);font-weight:600">Grupp</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map((r, i) => `
+              <tr style="border-bottom:1px solid var(--border);background:${i % 2 === 0 ? 'transparent' : 'var(--surface)'}">
+                <td style="padding:7px 10px;font-family:monospace;font-weight:600;color:var(--accent)">${r.index}</td>
+                <td style="padding:7px 10px">${esc(r.service)}</td>
+                <td style="padding:7px 10px;font-family:monospace;font-size:12px;color:var(--ink-2)">${esc(r.code || '')}</td>
+                <td style="padding:7px 10px">${esc(r.group)}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>`;
+    };
+
+    try {
+      const res = await API.getGroupIndexTable();
+      tableData = res.table || [];
+      renderTable(tableData);
+    } catch (err) {
+      const content = document.getElementById('idxtbl-content');
+      if (content) content.innerHTML = `<div style="padding:20px;text-align:center;font-size:13px;color:var(--bad)">${esc(err.message)}</div>`;
+    }
+
+    document.getElementById('idxtbl-csv')?.addEventListener('click', () => {
+      if (!tableData.length) return;
+      const rows = [['Indeks', 'Teenus', 'Kood', 'Grupp'], ...tableData.map(r => [r.index, r.service, r.code || '', r.group])];
+      const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\r\n');
+      const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'grupiindeksid.csv';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    });
+
+    document.getElementById('idxtbl-print')?.addEventListener('click', () => {
+      if (!tableData.length) return;
+      const rows = tableData.map(r =>
+        `<tr><td>${r.index}</td><td>${esc(r.service)}</td><td>${esc(r.code || '')}</td><td>${esc(r.group)}</td></tr>`
+      ).join('');
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Grupiindeksid</title>
+        <style>body{font-family:sans-serif;font-size:12px}table{width:100%;border-collapse:collapse}
+        th,td{border:1px solid #ccc;padding:5px 8px;text-align:left}th{background:#f0f0f0;font-weight:600}
+        tr:nth-child(even){background:#f9f9f9}</style></head><body>
+        <h2 style="margin-bottom:10px">Grupiindeksite tabel</h2>
+        <table><thead><tr><th>#</th><th>Teenus</th><th>Kood</th><th>Grupp</th></tr></thead>
+        <tbody>${rows}</tbody></table></body></html>`;
+      const w = window.open('', '_blank', 'width=700,height=600');
+      w.document.write(html);
+      w.document.close();
+      w.print();
+    });
   },
 };
