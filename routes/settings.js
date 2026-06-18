@@ -19,8 +19,8 @@ const DEFAULTS = {
     adminGroup: '',
   },
   services: {
-    adAttribute: 'extensionAttribute1',
-    groupIndexAttribute: 'extensionAttribute1',
+    adAttribute:         process.env.AD_SERVICE_ATTRIBUTE       || 'extensionAttribute1',
+    groupIndexAttribute: process.env.AD_GROUP_INDEX_ATTRIBUTE   || 'extensionAttribute1',
   },
   appearance: {
     systemName:  'AD Kasutajahaldus',
