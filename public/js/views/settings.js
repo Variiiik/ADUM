@@ -283,14 +283,20 @@ Views.Settings = {
       body = `
         <form id="st-svc-form">
           <div style="display:flex;align-items:flex-start;gap:9px;padding:12px 16px;background:var(--accent-weak);color:var(--accent);border-radius:9px;margin-bottom:20px;font-size:13px">
-            ${icon('info',15)} <span>Teenuste moodul salvestab kasutaja teenuserolli (O/T/L) valitud AD atribuuti. Väli peab AD skeemis juba eksisteerima.</span>
+            ${icon('info',15)} <span>Teenuste moodul salvestab kasutaja teenuserolli (O/T/L) kasutaja AD atribuuti ning grupi globaalse indeksi grupi AD atribuuti. Mõlemad väljad peavad AD skeemis juba eksisteerima.</span>
           </div>
           <div class="form-grid">
-            <div class="form-sec-title">AD atribuut</div>
+            <div class="form-sec-title">Kasutaja AD atribuut</div>
             <div class="field full">
-              <label>Atribuudi nimi</label>
+              <label>Atribuudi nimi (kasutajaobjektil)</label>
               <input class="input mono" id="sv-adattr" value="${esc(sv.adAttribute||'extensionAttribute1')}" placeholder="extensionAttribute1" autocomplete="off" />
-              <span class="hint">Kasutatakse AD kasutajate atribuudi täitmiseks teenusekoodide ja rollidega (nt <code>ERP:O;HIS:L</code>). Tavaliselt <code>extensionAttribute1</code>…<code>extensionAttribute15</code>.</span>
+              <span class="hint">Kasutaja AD objektil — täidetakse teenusekoodide ja rollidega (nt <code>ERP:O::;HIS:::3</code>). Tavaliselt <code>extensionAttribute1</code>…<code>extensionAttribute15</code>.</span>
+            </div>
+            <div class="form-sec-title">Grupi AD atribuut</div>
+            <div class="field full">
+              <label>Atribuudi nimi (grupiobjektil)</label>
+              <input class="input mono" id="sv-grpattr" value="${esc(sv.groupIndexAttribute||'extensionAttribute1')}" placeholder="extensionAttribute1" autocomplete="off" />
+              <span class="hint">Grupi AD objektil — salvestatakse grupi globaalne indeksnumber (nt <code>3</code>). Peab olema <strong>erinev</strong> kasutaja atribuudist. Tavaliselt <code>extensionAttribute2</code>.</span>
             </div>
           </div>
           <div style="display:flex;justify-content:flex-end;margin-top:20px">
@@ -921,7 +927,10 @@ Views.Settings = {
     // ── Services form ──
     document.getElementById('st-svc-form')?.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const data = { adAttribute: document.getElementById('sv-adattr').value.trim() || 'extensionAttribute1' };
+      const data = {
+        adAttribute:        document.getElementById('sv-adattr').value.trim()  || 'extensionAttribute1',
+        groupIndexAttribute: document.getElementById('sv-grpattr').value.trim() || 'extensionAttribute1',
+      };
       await self._save('services', data, container);
     });
 
