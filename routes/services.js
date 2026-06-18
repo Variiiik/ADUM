@@ -7,6 +7,7 @@ const lc     = require('../config/ldap');
 const audit  = require('../lib/audit');
 const db     = require('../lib/db');
 const adSync = require('../lib/adServiceSync');
+const { readGroupIndex, writeGroupIndex, clearGroupIndex } = require('../lib/adServiceSync');
 
 const router = express.Router();
 
@@ -76,9 +77,10 @@ async function enrichServices(services) {
   }
 
   try {
+    const groupIndexAttr = adSync.getGroupIndexAttribute();
     const [uRes, gRes] = await Promise.all([
       lc.searchUsers('(objectClass=user)', ['sAMAccountName','displayName','title','department']),
-      lc.searchGroups('(objectClass=group)', ['cn','description','groupType','member']),
+      lc.searchGroups('(objectClass=group)', ['cn','description','groupType','member', groupIndexAttr]),
     ]);
     const userMap = {};
     uRes.forEach(u => {
@@ -92,7 +94,9 @@ async function enrichServices(services) {
       const rawMember   = g.member ?? g.Member;
       const memberCount = rawMember ? (Array.isArray(rawMember) ? rawMember.length : 1) : 0;
       const gType = parseInt(g.groupType || g.grouptype || '0');
-      groupMap[name] = { name, desc: g.description || '', type: (gType & 0x80000000) ? 'Turberühm' : 'Jaotusrühm', memberCount };
+      const rawIdx = g[groupIndexAttr] || g[groupIndexAttr.toLowerCase()];
+      const adIndex = rawIdx ? parseInt(Array.isArray(rawIdx) ? rawIdx[0] : rawIdx, 10) : null;
+      groupMap[name] = { name, desc: g.description || '', type: (gType & 0x80000000) ? 'Turberühm' : 'Jaotusrühm', memberCount, adIndex: Number.isInteger(adIndex) ? adIndex : null };
     });
     return services.map(svc => _enrich(svc, userMap, groupMap));
   } catch {
@@ -114,8 +118,8 @@ function _enrich(svc, userMap, groupMap) {
     }
     const g = groupMap[gname];
     return g
-      ? { name: g.name, desc: g.desc || '', type: g.type || '', memberCount: g.memberCount || 0 }
-      : { name: gname, desc: '', type: '', memberCount: 0 };
+      ? { name: g.name, desc: g.desc || '', type: g.type || '', memberCount: g.memberCount || 0, adIndex: g.adIndex ?? null }
+      : { name: gname, desc: '', type: '', memberCount: 0, adIndex: null };
   });
 
   return {
@@ -280,14 +284,46 @@ router.put('/:id', requireAdmin, async (req, res) => {
     if (newGroups.length > 0 || removedGroups.length > 0) {
       const updatedIndices = { ...existing };
       for (const g of removedGroups) { delete updatedIndices[g]; }
+      // Clear AD group index attribute for removed groups (fire-and-forget)
+      for (const g of removedGroups) {
+        clearGroupIndex(g).catch(e => console.warn('[services] clearGroupIndex:', e.message));
+      }
       if (newGroups.length > 0) {
-        const [allSvcRows] = await db.query('SELECT group_indices FROM services');
-        const globalIdxs = allSvcRows.flatMap(r => {
-          const gi = typeof r.group_indices === 'string' ? JSON.parse(r.group_indices) : (r.group_indices || {});
-          return Object.values(gi).filter(Number.isInteger);
-        });
-        let nextIdx = globalIdxs.length > 0 ? Math.max(...globalIdxs) + 1 : 1;
-        for (const g of newGroups) { updatedIndices[g] = nextIdx++; }
+        // Read existing indices from AD groups first
+        const adIndices = await Promise.all(
+          newGroups.map(g => readGroupIndex(g).then(idx => ({ g, idx })))
+        );
+        const groupsNeedingIndex = [];
+        for (const { g, idx } of adIndices) {
+          if (idx !== null) {
+            updatedIndices[g] = idx; // reuse existing AD index
+          } else {
+            groupsNeedingIndex.push(g);
+          }
+        }
+        // Assign new indices only to groups that have none
+        if (groupsNeedingIndex.length > 0) {
+          const [allSvcRows] = await db.query('SELECT group_indices FROM services');
+          const globalIdxs = allSvcRows.flatMap(r => {
+            const gi = typeof r.group_indices === 'string' ? JSON.parse(r.group_indices) : (r.group_indices || {});
+            return Object.values(gi).filter(Number.isInteger);
+          });
+          // Also include indices just read from AD that aren't in DB yet
+          const adUsedIdxs = adIndices.filter(x => x.idx !== null).map(x => x.idx);
+          const allUsed = [...new Set([...globalIdxs, ...adUsedIdxs])];
+          let nextIdx = allUsed.length > 0 ? Math.max(...allUsed) + 1 : 1;
+          for (const g of groupsNeedingIndex) {
+            updatedIndices[g] = nextIdx;
+            writeGroupIndex(g, nextIdx).catch(e => console.warn('[services] writeGroupIndex:', e.message));
+            nextIdx++;
+          }
+        }
+        // Also write to AD for groups that already had AD index (ensure attribute is consistent)
+        for (const { g, idx } of adIndices) {
+          if (idx !== null) {
+            writeGroupIndex(g, idx).catch(() => {}); // fire-and-forget, non-fatal
+          }
+        }
       }
       sets.push('group_indices = ?');
       vals.push(JSON.stringify(updatedIndices));

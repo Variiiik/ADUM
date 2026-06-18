@@ -20,6 +20,7 @@ const DEFAULTS = {
   },
   services: {
     adAttribute: 'extensionAttribute1',
+    groupIndexAttribute: 'extensionAttribute1',
   },
   appearance: {
     systemName:  'AD Kasutajahaldus',
