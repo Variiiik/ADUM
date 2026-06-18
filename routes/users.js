@@ -173,6 +173,44 @@ router.post('/', requireAdmin, async (req, res) => {
 
     audit.logEvent(actor, 'CREATE_USER', username, 'success', department);
 
+    // Add user to configured groups (default group + outlook group) after creation
+    if (!lc.MOCK_AD) {
+      const settings     = _loadSettings();
+      const defaultGroup = process.env.LDAP_DEFAULT_GROUP || '';
+      const outlookGroup = settings.mail?.outlookGroup || '';
+      const groupsToAdd  = [...new Set([defaultGroup, outlookGroup].filter(Boolean))];
+
+      if (groupsToAdd.length) {
+        const ldapjs  = require('ldapjs');
+        const uRes    = await lc.searchUsers(
+          `(&(objectClass=user)(sAMAccountName=${lc.escapeLdap(username)}))`,
+          ['distinguishedName']
+        );
+        if (uRes.length) {
+          const userDN = getDN(uRes);
+          for (const grp of groupsToAdd) {
+            try {
+              const gRes = await lc.searchGroups(
+                `(&(objectClass=group)(cn=${lc.escapeLdap(grp)}))`,
+                ['distinguishedName']
+              );
+              if (!gRes.length) { console.warn(`[users] grup "${grp}" ei leitud`); continue; }
+              const client = lc.createClient();
+              await bind(client);
+              await ldapModify(client, getDN(gRes), ldapChanges([
+                { op: 'add', type: 'member', val: userDN }
+              ]));
+              client.unbind();
+              audit.logEvent(actor, 'GROUP_ADD', username, 'success', grp);
+            } catch (gErr) {
+              console.warn(`[users] grupi "${grp}" lisamine ebaõnnestus: ${gErr.message}`);
+              audit.logEvent(actor, 'GROUP_ADD', username, 'failure', grp);
+            }
+          }
+        }
+      }
+    }
+
     let smsResult = null;
     if (sendSms && telephoneNumber) {
       if (lc.MOCK_AD) {
