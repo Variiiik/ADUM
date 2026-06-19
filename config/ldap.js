@@ -4,8 +4,10 @@ require('dotenv').config();
 const ldap = require('ldapjs');
 const tls  = require('tls');
 
+const DEFAULT_GROUP = process.env.LDAP_DEFAULT_GROUP || '';
+
 const LDAP_URL  = process.env.LDAP_URL      || 'ldap://localhost';
-const BASE_DN   = process.env.LDAP_BASE_DN  || 'DC=haigla,DC=vmh,DC=ee';
+const BASE_DN   = process.env.LDAP_BASE_DN  || 'DC=example,DC=local';
 const BIND_USER = process.env.LDAP_BIND_DN  || '';
 const BIND_PASS = process.env.LDAP_BIND_PASS || '';
 const USERS_OU  = process.env.LDAP_USERS_OU  || BASE_DN;
@@ -163,27 +165,27 @@ const DEPT_TITLES = {
 
 const OUS = [
   // Kliinikud — osakonnakesksed OU-d
-  'OU=Kardioloogia,OU=Kliinikud,DC=haigla,DC=vmh,DC=ee',
-  'OU=Kiirabi,OU=Kliinikud,DC=haigla,DC=vmh,DC=ee',
-  'OU=Radioloogia,OU=Kliinikud,DC=haigla,DC=vmh,DC=ee',
-  'OU=Kirurgia,OU=Kliinikud,DC=haigla,DC=vmh,DC=ee',
-  'OU=Pediaatria,OU=Kliinikud,DC=haigla,DC=vmh,DC=ee',
-  'OU=Neuroloogia,OU=Kliinikud,DC=haigla,DC=vmh,DC=ee',
-  'OU=Sünnitusosakond,OU=Kliinikud,DC=haigla,DC=vmh,DC=ee',
-  'OU=Anestesioloogia,OU=Kliinikud,DC=haigla,DC=vmh,DC=ee',
-  'OU=Onkoloogia,OU=Kliinikud,DC=haigla,DC=vmh,DC=ee',
+  'OU=Kardioloogia,OU=Kliinikud,DC=example,DC=local',
+  'OU=Kiirabi,OU=Kliinikud,DC=example,DC=local',
+  'OU=Radioloogia,OU=Kliinikud,DC=example,DC=local',
+  'OU=Kirurgia,OU=Kliinikud,DC=example,DC=local',
+  'OU=Pediaatria,OU=Kliinikud,DC=example,DC=local',
+  'OU=Neuroloogia,OU=Kliinikud,DC=example,DC=local',
+  'OU=Sünnitusosakond,OU=Kliinikud,DC=example,DC=local',
+  'OU=Anestesioloogia,OU=Kliinikud,DC=example,DC=local',
+  'OU=Onkoloogia,OU=Kliinikud,DC=example,DC=local',
   // Tallinn — tugiteenused
-  'OU=IT-osakond,OU=Tugipersonal,OU=Tallinn,DC=haigla,DC=vmh,DC=ee',
-  'OU=Personaliosakond,OU=Tugipersonal,OU=Tallinn,DC=haigla,DC=vmh,DC=ee',
-  'OU=Apteek,OU=Tallinn,DC=haigla,DC=vmh,DC=ee',
-  'OU=Laboratoorium,OU=Tallinn,DC=haigla,DC=vmh,DC=ee',
-  'OU=Administratsioon,OU=Tallinn,DC=haigla,DC=vmh,DC=ee',
+  'OU=IT-osakond,OU=Tugipersonal,OU=Tallinn,DC=example,DC=local',
+  'OU=Personaliosakond,OU=Tugipersonal,OU=Tallinn,DC=example,DC=local',
+  'OU=Apteek,OU=Tallinn,DC=example,DC=local',
+  'OU=Laboratoorium,OU=Tallinn,DC=example,DC=local',
+  'OU=Administratsioon,OU=Tallinn,DC=example,DC=local',
   // Juur
-  'OU=Teenusekontod,DC=haigla,DC=vmh,DC=ee',
+  'OU=Teenusekontod,DC=example,DC=local',
 ];
 
 const ALL_GROUPS = [
-  'Haigla-Kõik','VPN-Kasutajad','eTervis-Ligipääs','Pilt-PACS',
+  ...(DEFAULT_GROUP ? [DEFAULT_GROUP] : []),'VPN-Kasutajad','eTervis-Ligipääs','Pilt-PACS',
   'Apteek-Ravimid','Labor-LIS','IT-Administraatorid','Arstid-Kardio',
   'Valvegraafik','Printerid-Tallinn','Personaliportaal','Õppejõud','AD-HR',
 ];
@@ -235,23 +237,23 @@ const MOCK_USERS = (() => {
       : new Date(Date.now() - daysAgo * 86400000).toISOString();
 
     const DEPT_TO_OU = {
-      'Kardioloogia':    'OU=Kardioloogia,OU=Kliinikud,DC=haigla,DC=vmh,DC=ee',
-      'Kiirabi':         'OU=Kiirabi,OU=Kliinikud,DC=haigla,DC=vmh,DC=ee',
-      'Radioloogia':     'OU=Radioloogia,OU=Kliinikud,DC=haigla,DC=vmh,DC=ee',
-      'IT-osakond':      'OU=IT-osakond,OU=Tugipersonal,OU=Tallinn,DC=haigla,DC=vmh,DC=ee',
-      'Kirurgia':        'OU=Kirurgia,OU=Kliinikud,DC=haigla,DC=vmh,DC=ee',
-      'Pediaatria':      'OU=Pediaatria,OU=Kliinikud,DC=haigla,DC=vmh,DC=ee',
-      'Neuroloogia':     'OU=Neuroloogia,OU=Kliinikud,DC=haigla,DC=vmh,DC=ee',
-      'Sünnitusosakond': 'OU=Sünnitusosakond,OU=Kliinikud,DC=haigla,DC=vmh,DC=ee',
-      'Apteek':          'OU=Apteek,OU=Tallinn,DC=haigla,DC=vmh,DC=ee',
-      'Laboratoorium':   'OU=Laboratoorium,OU=Tallinn,DC=haigla,DC=vmh,DC=ee',
-      'Personaliosakond':'OU=Personaliosakond,OU=Tugipersonal,OU=Tallinn,DC=haigla,DC=vmh,DC=ee',
-      'Anestesioloogia': 'OU=Anestesioloogia,OU=Kliinikud,DC=haigla,DC=vmh,DC=ee',
-      'Onkoloogia':      'OU=Onkoloogia,OU=Kliinikud,DC=haigla,DC=vmh,DC=ee',
+      'Kardioloogia':    'OU=Kardioloogia,OU=Kliinikud,DC=example,DC=local',
+      'Kiirabi':         'OU=Kiirabi,OU=Kliinikud,DC=example,DC=local',
+      'Radioloogia':     'OU=Radioloogia,OU=Kliinikud,DC=example,DC=local',
+      'IT-osakond':      'OU=IT-osakond,OU=Tugipersonal,OU=Tallinn,DC=example,DC=local',
+      'Kirurgia':        'OU=Kirurgia,OU=Kliinikud,DC=example,DC=local',
+      'Pediaatria':      'OU=Pediaatria,OU=Kliinikud,DC=example,DC=local',
+      'Neuroloogia':     'OU=Neuroloogia,OU=Kliinikud,DC=example,DC=local',
+      'Sünnitusosakond': 'OU=Sünnitusosakond,OU=Kliinikud,DC=example,DC=local',
+      'Apteek':          'OU=Apteek,OU=Tallinn,DC=example,DC=local',
+      'Laboratoorium':   'OU=Laboratoorium,OU=Tallinn,DC=example,DC=local',
+      'Personaliosakond':'OU=Personaliosakond,OU=Tugipersonal,OU=Tallinn,DC=example,DC=local',
+      'Anestesioloogia': 'OU=Anestesioloogia,OU=Kliinikud,DC=example,DC=local',
+      'Onkoloogia':      'OU=Onkoloogia,OU=Kliinikud,DC=example,DC=local',
     };
-    const ou = DEPT_TO_OU[dept] || 'OU=Administratsioon,OU=Tallinn,DC=haigla,DC=vmh,DC=ee';
+    const ou = DEPT_TO_OU[dept] || 'OU=Administratsioon,OU=Tallinn,DC=example,DC=local';
 
-    const groups = ['Haigla-Kõik'];
+    const groups = DEFAULT_GROUP ? [DEFAULT_GROUP] : [];
     for (let g = 0; g < 1 + Math.floor(rnd() * 3); g++) {
       const avail = ALL_GROUPS.filter(x => !groups.includes(x));
       if (avail.length) groups.push(pick(avail));
@@ -265,8 +267,8 @@ const MOCK_USERS = (() => {
       displayName: p.f + ' ' + p.l,
       givenName: p.f,
       sn: p.l,
-      userPrincipalName: uname + '@haigla.vmh.ee',
-      mail: uname + '@haigla.ee',
+      userPrincipalName: uname + '@example.local',
+      mail: uname + '@example.com',
       department: dept,
       title,
       manager: null,
@@ -302,29 +304,29 @@ MOCK_USERS.push({
   displayName: 'Piret Truu',
   givenName: 'Piret',
   sn: 'Truu',
-  userPrincipalName: 'p.personalijuht@haigla.vmh.ee',
-  mail: 'p.personalijuht@haigla.ee',
+  userPrincipalName: 'p.personalijuht@example.local',
+  mail: 'p.personalijuht@example.com',
   department: 'Personaliosakond',
   title: 'Personalijuht',
   manager: null,
   telephoneNumber: '+372 51234567',
   employeeID: 'EMP9001',
-  ou: 'OU=Personaliosakond,OU=Tugipersonal,OU=Tallinn,DC=haigla,DC=vmh,DC=ee',
-  dn: 'CN=Piret Truu,OU=Personaliosakond,OU=Tugipersonal,OU=Tallinn,DC=haigla,DC=vmh,DC=ee',
+  ou: 'OU=Personaliosakond,OU=Tugipersonal,OU=Tallinn,DC=example,DC=local',
+  dn: 'CN=Piret Truu,OU=Personaliosakond,OU=Tugipersonal,OU=Tallinn,DC=example,DC=local',
   userAccountControl: 512,
   lockoutTime: 0,
   lastLogon: new Date().toISOString(),
   pwdLastSet: new Date().toISOString(),
   pwNeverExpires: false,
   mustChangePw: false,
-  groups: ['Haigla-Kõik', 'AD-HR'],
+  groups: [...(DEFAULT_GROUP ? [DEFAULT_GROUP] : []), 'AD-HR'],
   avatarColor: '#0891b2',
   created: '01.01.2023',
   status: 'active',
 });
 
 const MOCK_GROUPS = [
-  { name:'Haigla-Kõik',      desc:'Kõik töötajad',              type:'Turberühm'  },
+  ...(DEFAULT_GROUP ? [{ name: DEFAULT_GROUP, desc: 'Kõik töötajad', type: 'Turberühm' }] : []),
   { name:'VPN-Kasutajad',    desc:'Kaugligipääs (VPN)',          type:'Turberühm'  },
   { name:'eTervis-Ligipääs', desc:'Tervise infosüsteem',         type:'Turberühm'  },
   { name:'Pilt-PACS',        desc:'Radioloogia pildiarhiiv',     type:'Turberühm'  },
@@ -347,7 +349,7 @@ function computeStatus(uac, lockoutTime) {
 }
 
 module.exports = {
-  LDAP_URL, BASE_DN, BIND_USER, BIND_PASS, USERS_OU, GROUPS_OU, MOCK_AD,
+  LDAP_URL, BASE_DN, BIND_USER, BIND_PASS, USERS_OU, GROUPS_OU, MOCK_AD, DEFAULT_GROUP,
   createClient, search, searchUsers, searchGroups, escapeLdap, computeStatus,
   MOCK_USERS, MOCK_GROUPS, DEPARTMENTS, OUS, ALL_GROUPS,
 };

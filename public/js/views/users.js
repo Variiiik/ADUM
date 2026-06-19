@@ -496,12 +496,11 @@ Views.Users = {
               <label>Grupikuuluvused</label>
               <div style="display:flex;flex-wrap:wrap;gap:8px;padding:10px;border:1px solid var(--border);border-radius:9px;background:var(--surface-2);max-height:160px;overflow-y:auto" id="f-groups-wrap">
                 ${allGroups.map(g => {
-                  const checked = user ? user.groups?.includes(g.name) : g.name === 'Haigla-Kõik';
-                  const locked  = g.name === 'Haigla-Kõik';
-                  return `<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:${locked?'default':'pointer'};min-width:160px">
-                    <input type="checkbox" data-group="${esc(g.name)}" ${checked?'checked':''} ${locked?'disabled':''} />
+                  const checked = user ? user.groups?.includes(g.name) : false;
+                  const locked  = false;
+                  return `<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;min-width:160px">
+                    <input type="checkbox" data-group="${esc(g.name)}" ${checked?'checked':''} />
                     <span>${esc(g.name)}</span>
-                    ${locked?'<span style="font-size:11px;color:var(--ink-3)">(alati)</span>':''}
                   </label>`;
                 }).join('')}
               </div>
@@ -775,7 +774,7 @@ Views.Users = {
           const managedNames = new Set(allGroups.map(g => g.name));
           const oldGroups = (user.groups || []).filter(g => managedNames.has(g));
           const toAdd     = selGroups.filter(g => !oldGroups.includes(g));
-          const toRemove  = oldGroups.filter(g => !selGroups.includes(g) && g !== 'Haigla-Kõik');
+          const toRemove  = oldGroups.filter(g => !selGroups.includes(g));
           await Promise.allSettled([
             ...toAdd.map(g => API.addToGroup(sam, g)),
             ...toRemove.map(g => API.removeFromGroup(sam, g)),
@@ -805,8 +804,8 @@ Views.Users = {
             employeeID:empid||undefined, sendSms,
           });
 
-          // Add to extra groups (Haigla-Kõik lisatakse serveris automaatselt)
-          const extraGroups = selGroups.filter(g => g !== 'Haigla-Kõik');
+          // Add to extra groups
+          const extraGroups = [...selGroups];
           // If Outlook mail selected, also add to outlook group
           if (mailType === 'outlook' && mailSettings.outlookGroup &&
               !extraGroups.includes(mailSettings.outlookGroup)) {

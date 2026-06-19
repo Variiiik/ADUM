@@ -4,14 +4,14 @@ const express    = require('express');
 const path       = require('path');
 const fs         = require('fs');
 const router     = express.Router();
-const { requireAdmin } = require('../middleware/auth');
+const { requireAuth, requireAdmin } = require('../middleware/auth');
 const requests   = require('../lib/requests');
 const { createUser } = require('../lib/createUser');
 const audit      = require('../lib/audit');
 const lc         = require('../config/ldap');
 
 // GET /api/requests — admin: all; HR/user: own only
-router.get('/', async (req, res) => {
+router.get('/', requireAuth, async (req, res) => {
   try {
     const { isAdmin, sam } = req.session.user;
     const list = await requests.load();
@@ -34,7 +34,7 @@ router.get('/count', requireAdmin, async (req, res) => {
 });
 
 // POST /api/requests — submit a new request (type: create | modify | disable | delete)
-router.post('/', async (req, res) => {
+router.post('/', requireAuth, async (req, res) => {
   const type = req.body.type || 'create';
 
   if (type === 'create') {
@@ -155,7 +155,7 @@ router.post('/:id/reject', requireAdmin, async (req, res) => {
 });
 
 // DELETE /api/requests/:id — HR: own pending only; Admin: any pending
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireAuth, async (req, res) => {
   const { isAdmin, sam } = req.session.user;
   try {
     const item = await requests.get(req.params.id);

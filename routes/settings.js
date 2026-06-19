@@ -19,11 +19,12 @@ const DEFAULTS = {
     adminGroup: '',
   },
   services: {
-    adAttribute: 'extensionAttribute1',
+    adAttribute:         process.env.AD_SERVICE_ATTRIBUTE       || 'extensionAttribute1',
+    groupIndexAttribute: process.env.AD_GROUP_INDEX_ATTRIBUTE   || 'extensionAttribute1',
   },
   appearance: {
     systemName:  'AD Kasutajahaldus',
-    orgName:     'Viljandi Haigla',
+    orgName:     '',
     accentColor: '#b02a37',
     navyColor:   '#5e1d27',
     navyColor2:  '#4a141d',
@@ -45,10 +46,10 @@ const DEFAULTS = {
     outlookGroup: '',
   },
   ldap: {
-    url:       process.env.LDAP_URL      || 'ldap://dc01.haigla.vmh.ee',
+    url:       process.env.LDAP_URL      || '',
     port:      389,
     tls:       false,
-    baseDN:    process.env.LDAP_BASE_DN  || 'DC=haigla,DC=vmh,DC=ee',
+    baseDN:    process.env.LDAP_BASE_DN  || '',
     bindDN:    process.env.LDAP_BIND_DN  || '',
     bindPass:  '',
     usersOU:   process.env.LDAP_USERS_OU || '',
@@ -108,13 +109,28 @@ const DEFAULTS = {
   },
 };
 
+function deepMerge(defaults, overrides) {
+  const result = { ...defaults };
+  for (const key of Object.keys(overrides)) {
+    const val = overrides[key];
+    if (val !== null && val !== undefined && typeof val === 'object' && !Array.isArray(val)) {
+      result[key] = deepMerge(result[key] || {}, val);
+    } else if (val !== null && val !== undefined && val !== '') {
+      result[key] = val;
+    }
+  }
+  return result;
+}
+
 function load() {
+  const base = JSON.parse(JSON.stringify(DEFAULTS));
   try {
     if (fs.existsSync(SETTINGS_FILE)) {
-      return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+      const file = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+      return deepMerge(base, file);
     }
   } catch { /* fall through */ }
-  return JSON.parse(JSON.stringify(DEFAULTS));
+  return base;
 }
 
 function save(settings) {

@@ -106,7 +106,7 @@ Views.UserDetail = {
               <div class="nm">${esc(g.name)}</div>
               <div class="ds">${esc(g.desc)} · ${esc(g.type)}</div>
             </div>
-            ${isAdmin && gname!=='Haigla-Kõik' ? `<button class="icon-act danger" title="Eemalda grupist" data-rm-group="${esc(gname)}">${icon('x',16)}</button>` : ''}
+            ${isAdmin ? `<button class="icon-act danger" title="Eemalda grupist" data-rm-group="${esc(gname)}">${icon('x',16)}</button>` : ''}
           </div>`;
         }).join('')}`;
 
@@ -466,8 +466,8 @@ Views.UserDetail = {
     document.getElementById('ud-alias-add')?.addEventListener('click', async () => {
       const inp = document.getElementById('ud-alias-input');
       const alias = inp?.value.trim();
-      if (!alias || !alias.includes('@')) {
-        App.toast('warn', 'Vigane alias', 'Alias peab sisaldama @-märki.');
+      if (!alias || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(alias)) {
+        App.toast('warn', 'Vigane alias', 'Sisesta korrektne e-posti aadress (nt alias@domeen.ee).');
         return;
       }
       try {

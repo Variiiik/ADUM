@@ -55,7 +55,7 @@ app.use(helmet({
   } : false,
   crossOriginEmbedderPolicy: false,
   referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
-  strictTransportSecurity: false,
+  strictTransportSecurity: { maxAge: 31536000, includeSubDomains: true },
 }));
 
 // Rate limiting

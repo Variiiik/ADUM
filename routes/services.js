@@ -7,6 +7,7 @@ const lc     = require('../config/ldap');
 const audit  = require('../lib/audit');
 const db     = require('../lib/db');
 const adSync = require('../lib/adServiceSync');
+const { readGroupIndex, writeGroupIndex, clearGroupIndex } = require('../lib/adServiceSync');
 
 const router = express.Router();
 
@@ -76,9 +77,10 @@ async function enrichServices(services) {
   }
 
   try {
+    const groupIndexAttr = adSync.getGroupIndexAttribute();
     const [uRes, gRes] = await Promise.all([
       lc.searchUsers('(objectClass=user)', ['sAMAccountName','displayName','title','department']),
-      lc.searchGroups('(objectClass=group)', ['cn','description','groupType','member']),
+      lc.searchGroups('(objectClass=group)', ['cn','description','groupType','member', groupIndexAttr]),
     ]);
     const userMap = {};
     uRes.forEach(u => {
@@ -92,7 +94,9 @@ async function enrichServices(services) {
       const rawMember   = g.member ?? g.Member;
       const memberCount = rawMember ? (Array.isArray(rawMember) ? rawMember.length : 1) : 0;
       const gType = parseInt(g.groupType || g.grouptype || '0');
-      groupMap[name] = { name, desc: g.description || '', type: (gType & 0x80000000) ? 'Turberühm' : 'Jaotusrühm', memberCount };
+      const rawIdx = g[groupIndexAttr] || g[groupIndexAttr.toLowerCase()];
+      const adIndex = rawIdx ? parseInt(Array.isArray(rawIdx) ? rawIdx[0] : rawIdx, 10) : null;
+      groupMap[name] = { name, desc: g.description || '', type: (gType & 0x80000000) ? 'Turberühm' : 'Jaotusrühm', memberCount, adIndex: Number.isInteger(adIndex) ? adIndex : null };
     });
     return services.map(svc => _enrich(svc, userMap, groupMap));
   } catch {
@@ -114,8 +118,8 @@ function _enrich(svc, userMap, groupMap) {
     }
     const g = groupMap[gname];
     return g
-      ? { name: g.name, desc: g.desc || '', type: g.type || '', memberCount: g.memberCount || 0 }
-      : { name: gname, desc: '', type: '', memberCount: 0 };
+      ? { name: g.name, desc: g.desc || '', type: g.type || '', memberCount: g.memberCount || 0, adIndex: g.adIndex ?? null }
+      : { name: gname, desc: '', type: '', memberCount: 0, adIndex: null };
   });
 
   return {
@@ -179,6 +183,10 @@ router.get('/group-index-table', requireAdmin, async (req, res) => {
 // GET /api/services/user/:sam — services where a user has any role
 // (must be before /:id routes so "user" isn't matched as an id)
 router.get('/user/:sam', async (req, res) => {
+  const { isAdmin, sam: actorSam } = req.session.user;
+  if (!isAdmin && req.params.sam !== actorSam) {
+    return res.status(403).json({ error: 'Ligipääs keelatud.' });
+  }
   try {
     const sam      = req.params.sam;
     const services = await listServices();
@@ -276,14 +284,58 @@ router.put('/:id', requireAdmin, async (req, res) => {
     if (newGroups.length > 0 || removedGroups.length > 0) {
       const updatedIndices = { ...existing };
       for (const g of removedGroups) { delete updatedIndices[g]; }
+      // Clear AD group index attribute for removed groups (fire-and-forget)
+      for (const g of removedGroups) {
+        clearGroupIndex(g).catch(e => console.warn('[services] clearGroupIndex:', e.message));
+      }
       if (newGroups.length > 0) {
+        // 1. Read all services' DB indices — build global group→index map
         const [allSvcRows] = await db.query('SELECT group_indices FROM services');
-        const globalIdxs = allSvcRows.flatMap(r => {
+        const dbGroupIndex = {};
+        allSvcRows.forEach(r => {
           const gi = typeof r.group_indices === 'string' ? JSON.parse(r.group_indices) : (r.group_indices || {});
-          return Object.values(gi).filter(Number.isInteger);
+          Object.entries(gi).forEach(([gname, idx]) => {
+            if (Number.isInteger(idx) && dbGroupIndex[gname] == null) dbGroupIndex[gname] = idx;
+          });
         });
-        let nextIdx = globalIdxs.length > 0 ? Math.max(...globalIdxs) + 1 : 1;
-        for (const g of newGroups) { updatedIndices[g] = nextIdx++; }
+        const allUsedIdxs = new Set(Object.values(dbGroupIndex).filter(Number.isInteger));
+
+        // 2. Read AD group attributes in parallel
+        const adIndices = await Promise.all(
+          newGroups.map(g => readGroupIndex(g).then(idx => ({ g, idx })))
+        );
+
+        // 3. Resolve index for each new group: AD → DB (other services) → generate new
+        const groupsNeedingIndex = [];
+        for (const { g, idx } of adIndices) {
+          if (idx !== null) {
+            updatedIndices[g] = idx;
+            allUsedIdxs.add(idx);
+          } else if (dbGroupIndex[g] != null) {
+            updatedIndices[g] = dbGroupIndex[g]; // already indexed in another service
+          } else {
+            groupsNeedingIndex.push(g);
+          }
+        }
+
+        // 4. Generate new indices for groups that have none anywhere
+        if (groupsNeedingIndex.length > 0) {
+          let nextIdx = allUsedIdxs.size > 0 ? Math.max(...allUsedIdxs) + 1 : 1;
+          for (const g of groupsNeedingIndex) {
+            updatedIndices[g] = nextIdx;
+            allUsedIdxs.add(nextIdx);
+            writeGroupIndex(g, nextIdx).catch(e => console.warn('[services] writeGroupIndex:', e.message));
+            nextIdx++;
+          }
+        }
+
+        // 5. Ensure AD attribute is written for all resolved groups
+        for (const { g, idx } of adIndices) {
+          if (idx !== null) writeGroupIndex(g, idx).catch(() => {});
+        }
+        for (const g of newGroups.filter(g => dbGroupIndex[g] != null && !adIndices.find(x => x.g === g && x.idx !== null))) {
+          writeGroupIndex(g, dbGroupIndex[g]).catch(() => {});
+        }
       }
       sets.push('group_indices = ?');
       vals.push(JSON.stringify(updatedIndices));
@@ -303,7 +355,19 @@ router.put('/:id', requireAdmin, async (req, res) => {
   ]);
   const syncErrors = await _syncUsers(updated, [...affected]);
 
-  audit.logEvent(req.session.user.sam, 'UPDATE_SERVICE', updated.name, 'success', updated.code);
+  const changedFields = [];
+  if (name !== undefined && name !== svc.name)                         changedFields.push('name');
+  if (description !== undefined && description !== svc.description)    changedFields.push('description');
+  if (code !== undefined && normalizeCode(code) !== svc.code)          changedFields.push('code');
+  if (adLinked !== undefined)                                           changedFields.push('adLinked');
+  if (owners !== undefined)                                             changedFields.push('owners');
+  if (technicalPerson !== undefined)                                    changedFields.push('technicalPerson');
+  if (members !== undefined)                                            changedFields.push('members');
+  if (rightsGroups !== undefined)                                       changedFields.push('rightsGroups');
+  const auditDetail = changedFields.length
+    ? `Muudetud: ${changedFields.join(', ')} [${updated.code}]`
+    : updated.code;
+  audit.logEvent(req.session.user.sam, 'UPDATE_SERVICE', updated.name, 'success', auditDetail);
   const [enriched] = await enrichServices([updated]);
   res.json({ service: enriched, ...(syncErrors.length ? { syncWarnings: syncErrors } : {}) });
 });

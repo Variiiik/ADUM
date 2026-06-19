@@ -66,7 +66,7 @@ Views.Settings = {
             </div>
             <div class="field">
               <label>Asutus / organisatsioon</label>
-              <input class="input" id="ap-orgname" value="${esc(ap.orgName||'Viljandi Haigla')}" placeholder="Viljandi Haigla" />
+              <input class="input" id="ap-orgname" value="${esc(ap.orgName||'')}" placeholder="Minu Organisatsioon" />
               <span class="hint">Alampealkiri logo all</span>
             </div>
           </div>
@@ -149,7 +149,7 @@ Views.Settings = {
               </div>
               <div>
                 <div id="ap-prev-name" style="color:#fff;font-size:13.5px;font-weight:600">${esc(ap.systemName||'AD Kasutajahaldus')}</div>
-                <div id="ap-prev-org"  style="color:#8595b3;font-size:11.5px">${esc(ap.orgName||'Viljandi Haigla')}</div>
+                <div id="ap-prev-org"  style="color:#8595b3;font-size:11.5px">${esc(ap.orgName||'')}</div>
               </div>
             </div>
             <div style="background:var(--surface-2);padding:10px 14px;display:flex;gap:8px;align-items:center">
@@ -283,14 +283,20 @@ Views.Settings = {
       body = `
         <form id="st-svc-form">
           <div style="display:flex;align-items:flex-start;gap:9px;padding:12px 16px;background:var(--accent-weak);color:var(--accent);border-radius:9px;margin-bottom:20px;font-size:13px">
-            ${icon('info',15)} <span>Teenuste moodul salvestab kasutaja teenuserolli (O/T/L) valitud AD atribuuti. Väli peab AD skeemis juba eksisteerima.</span>
+            ${icon('info',15)} <span>Teenuste moodul salvestab kasutaja teenuserolli (O/T/L) kasutaja AD atribuuti ning grupi globaalse indeksi grupi AD atribuuti. Mõlemad väljad peavad AD skeemis juba eksisteerima.</span>
           </div>
           <div class="form-grid">
-            <div class="form-sec-title">AD atribuut</div>
+            <div class="form-sec-title">Kasutaja AD atribuut</div>
             <div class="field full">
-              <label>Atribuudi nimi</label>
+              <label>Atribuudi nimi (kasutajaobjektil)</label>
               <input class="input mono" id="sv-adattr" value="${esc(sv.adAttribute||'extensionAttribute1')}" placeholder="extensionAttribute1" autocomplete="off" />
-              <span class="hint">Kasutatakse AD kasutajate atribuudi täitmiseks teenusekoodide ja rollidega (nt <code>ERP:O;HIS:L</code>). Tavaliselt <code>extensionAttribute1</code>…<code>extensionAttribute15</code>.</span>
+              <span class="hint">Kasutaja AD objektil — täidetakse teenusekoodide ja rollidega (nt <code>ERP:O::;HIS:::3</code>). Tavaliselt <code>extensionAttribute1</code>…<code>extensionAttribute15</code>.</span>
+            </div>
+            <div class="form-sec-title">Grupi AD atribuut</div>
+            <div class="field full">
+              <label>Atribuudi nimi (grupiobjektil)</label>
+              <input class="input mono" id="sv-grpattr" value="${esc(sv.groupIndexAttribute||'extensionAttribute1')}" placeholder="extensionAttribute1" autocomplete="off" />
+              <span class="hint">Grupi AD objektil — salvestatakse grupi globaalne indeksnumber (nt <code>3</code>). Peab olema <strong>erinev</strong> kasutaja atribuudist. Tavaliselt <code>extensionAttribute2</code>.</span>
             </div>
           </div>
           <div style="display:flex;justify-content:flex-end;margin-top:20px">
@@ -305,7 +311,7 @@ Views.Settings = {
             <div class="form-sec-title">Serveri ühendus</div>
             <div class="field">
               <label>LDAP URL</label>
-              <input class="input" id="sl-url" value="${esc(l.url||'')}" placeholder="ldap://dc01.haigla.vmh.ee" />
+              <input class="input" id="sl-url" value="${esc(l.url||'')}" placeholder="ldap://dc01.example.local" />
               <span class="hint">ldap:// või ldaps:// protokoll</span>
             </div>
             <div class="field">
@@ -330,17 +336,17 @@ Views.Settings = {
             <div class="form-sec-title">Kataloog</div>
             <div class="field">
               <label>Base DN</label>
-              <input class="input mono" id="sl-basedn" value="${esc(l.baseDN||'')}" placeholder="DC=haigla,DC=vmh,DC=ee" />
+              <input class="input mono" id="sl-basedn" value="${esc(l.baseDN||'')}" placeholder="DC=example,DC=local" />
             </div>
             <div class="field">
               <label>Kasutajate OU</label>
-              <input class="input mono" id="sl-usersou" value="${esc(l.usersOU||'')}" placeholder="OU=Users,DC=haigla,DC=vmh,DC=ee" />
+              <input class="input mono" id="sl-usersou" value="${esc(l.usersOU||'')}" placeholder="OU=Users,DC=example,DC=local" />
             </div>
 
             <div class="form-sec-title">Teenuskonto</div>
             <div class="field full">
               <label>Bind DN</label>
-              <input class="input mono" id="sl-binddn" value="${esc(l.bindDN||'')}" placeholder="CN=svc-admanager,OU=Service Accounts,DC=haigla,DC=vmh,DC=ee" />
+              <input class="input mono" id="sl-binddn" value="${esc(l.bindDN||'')}" placeholder="CN=svc-admanager,OU=Service Accounts,DC=example,DC=local" />
             </div>
             <div class="field">
               <label>Bind parool</label>
@@ -377,7 +383,7 @@ Views.Settings = {
             <div class="form-sec-title">SMTP server</div>
             <div class="field">
               <label>SMTP host</label>
-              <input class="input" id="se-host" value="${esc(e.host||'')}" placeholder="smtp.haigla.ee" />
+              <input class="input" id="se-host" value="${esc(e.host||'')}" placeholder="smtp.example.com" />
             </div>
             <div class="field">
               <label>Port</label>
@@ -397,7 +403,7 @@ Views.Settings = {
             <div class="form-sec-title">Autentimine</div>
             <div class="field">
               <label>Kasutajanimi</label>
-              <input class="input" id="se-user" value="${esc(e.user||'')}" placeholder="noreply@haigla.ee" />
+              <input class="input" id="se-user" value="${esc(e.user||'')}" placeholder="noreply@example.com" />
             </div>
             <div class="field">
               <label>Parool</label>
@@ -411,7 +417,7 @@ Views.Settings = {
             </div>
             <div class="field">
               <label>Saatja e-post</label>
-              <input class="input" id="se-from" type="email" value="${esc(e.from||'')}" placeholder="noreply@haigla.ee" />
+              <input class="input" id="se-from" type="email" value="${esc(e.from||'')}" placeholder="noreply@example.com" />
             </div>
           </div>
           <div style="display:flex;gap:10px;margin-top:20px;align-items:center">
@@ -682,7 +688,7 @@ Views.Settings = {
         const accent = document.getElementById('ap-accent').value || '#b02a37';
         const navy   = document.getElementById('ap-navy').value   || '#5e1d27';
         const name   = document.getElementById('ap-sysname').value || 'AD Kasutajahaldus';
-        const org    = document.getElementById('ap-orgname').value || 'Viljandi Haigla';
+        const org    = document.getElementById('ap-orgname').value || '';
         const el = id => document.getElementById(id);
         if (el('ap-prev-sb'))    el('ap-prev-sb').style.background = navy;
         if (el('ap-prev-logo'))  el('ap-prev-logo').style.background = accent;
@@ -870,7 +876,7 @@ Views.Settings = {
         e.preventDefault();
         const data = {
           systemName:  document.getElementById('ap-sysname').value.trim()  || 'AD Kasutajahaldus',
-          orgName:     document.getElementById('ap-orgname').value.trim()  || 'Viljandi Haigla',
+          orgName:     document.getElementById('ap-orgname').value.trim()  || '',
           accentColor: document.getElementById('ap-accent').value,
           navyColor:   document.getElementById('ap-navy').value,
           navyColor2:  document.getElementById('ap-navy2').value,
@@ -921,7 +927,10 @@ Views.Settings = {
     // ── Services form ──
     document.getElementById('st-svc-form')?.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const data = { adAttribute: document.getElementById('sv-adattr').value.trim() || 'extensionAttribute1' };
+      const data = {
+        adAttribute:        document.getElementById('sv-adattr').value.trim()  || 'extensionAttribute1',
+        groupIndexAttribute: document.getElementById('sv-grpattr').value.trim() || 'extensionAttribute1',
+      };
       await self._save('services', data, container);
     });
 

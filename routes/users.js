@@ -3,12 +3,22 @@
 const express    = require('express');
 const fs         = require('fs');
 const path       = require('path');
+const rateLimit  = require('express-rate-limit');
 const router     = express.Router();
 const lc         = require('../config/ldap');
 const audit      = require('../lib/audit');
 const { requireAdmin } = require('../middleware/auth');
 const { createUser } = require('../lib/createUser');
 const db             = require('../lib/db');
+
+const passwordResetLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  message: { error: 'Liiga palju paroolilähtestamise katseid. Proovige 15 minuti pärast uuesti.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: false,
+});
 
 // Windows FILETIME (100ns ticks since 1601-01-01) → ISO string, or null if absent/zero
 function winFileTimeToIso(raw) {
@@ -153,12 +163,53 @@ router.post('/', requireAdmin, async (req, res) => {
   }
   if (!validateSam(username)) return res.status(400).json({ error: 'Kasutajanimi sisaldab lubamatuid märke.' });
   if (password.length < 8)    return res.status(400).json({ error: 'Parool peab olema vähemalt 8 tähemärki.' });
+  if (ou && (typeof ou !== 'string' || /[\x00-\x1f]/.test(ou) || !/^[a-zA-Z0-9\s,=_\-\.]+$/.test(ou))) {
+    return res.status(400).json({ error: 'Vigane OU vorming.' });
+  }
 
   try {
     const result = await createUser(req.body);
     const nu     = result.user || {};
 
     audit.logEvent(actor, 'CREATE_USER', username, 'success', department);
+
+    // Add user to configured groups (default group + outlook group) after creation
+    if (!lc.MOCK_AD) {
+      const settings     = _loadSettings();
+      const defaultGroup = process.env.LDAP_DEFAULT_GROUP || '';
+      const outlookGroup = settings.mail?.outlookGroup || '';
+      const groupsToAdd  = [...new Set([defaultGroup, outlookGroup].filter(Boolean))];
+
+      if (groupsToAdd.length) {
+        const ldapjs  = require('ldapjs');
+        const uRes    = await lc.searchUsers(
+          `(&(objectClass=user)(sAMAccountName=${lc.escapeLdap(username)}))`,
+          ['distinguishedName']
+        );
+        if (uRes.length) {
+          const userDN = getDN(uRes);
+          for (const grp of groupsToAdd) {
+            try {
+              const gRes = await lc.searchGroups(
+                `(&(objectClass=group)(cn=${lc.escapeLdap(grp)}))`,
+                ['distinguishedName']
+              );
+              if (!gRes.length) { console.warn(`[users] grup "${grp}" ei leitud`); continue; }
+              const client = lc.createClient();
+              await bind(client);
+              await ldapModify(client, getDN(gRes), ldapChanges([
+                { op: 'add', type: 'member', val: userDN }
+              ]));
+              client.unbind();
+              audit.logEvent(actor, 'GROUP_ADD', username, 'success', grp);
+            } catch (gErr) {
+              console.warn(`[users] grupi "${grp}" lisamine ebaõnnestus: ${gErr.message}`);
+              audit.logEvent(actor, 'GROUP_ADD', username, 'failure', grp);
+            }
+          }
+        }
+      }
+    }
 
     let smsResult = null;
     if (sendSms && telephoneNumber) {
@@ -275,7 +326,7 @@ router.delete('/:sam', requireAdmin, async (req, res) => {
 });
 
 // POST /api/users/:sam/reset-password
-router.post('/:sam/reset-password', requireAdmin, async (req, res) => {
+router.post('/:sam/reset-password', requireAdmin, passwordResetLimiter, async (req, res) => {
   const { sam } = req.params;
   const actor   = req.session.user.sam;
   const { password } = req.body;
